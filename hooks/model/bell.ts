@@ -4,13 +4,16 @@
 import { YOU } from './desk.ts'
 import type { DeskItem } from './desk.ts'
 
-// One thing that rang: WHO put it or asked, and WHAT it says (its kind word and its words, or the ask's words).
-export type Ring = { who: string; text: string }
+// One thing that rang: WHO put it or asked, and WHAT it says (its kind word and its words, or the ask's words). `on` is what the words are on, where the feed's
+// answer says it: the line reads `WHO on ON: WHAT`, and WHO alone stays the name of the newest in a fold.
+export type Ring = { who: string; text: string; on?: string }
 
 // The width of one line of a toast, in characters: a line past it is cut with the ellipsis.
 export const TOAST_COLS = 72
 // The least room a keeper's note is worth: a note that has less goes, and the ask stands whole.
 const NOTE_MIN = 8
+// The least of the words of a feed toast that stand when its `on` is cut to make room.
+const WORDS_MIN = 24
 
 const flat = (text: string): string => text.replace(/\s+/g, ' ').trim()
 
@@ -24,8 +27,17 @@ export function fit(text: string, cols: number): string {
 const KIND_WORD: Record<string, string> = { sign: 'sign', decision: 'decide', test: 'test', reading: 'read' }
 export const kindWord = (kind: string): string => KIND_WORD[kind] ?? (flat(kind) === '' ? 'item' : flat(kind))
 
-// WHO: WHAT on one line. A WHO that is empty is the room.
-export const ringLine = (ring: Ring): string => fit(`${flat(ring.who) === '' ? 'room' : flat(ring.who)}: ${ring.text}`, TOAST_COLS)
+// WHO: WHAT on one line, or WHO on ON: WHAT where the ring is on something. A WHO that is empty is the room. The words come first: ON is cut so that
+// at least WORDS_MIN characters of WHAT stand (or all of WHAT where it is shorter), and with no room for a cut ON the line is WHO: WHAT.
+export function ringLine(ring: Ring): string {
+  const who = flat(ring.who) === '' ? 'room' : flat(ring.who)
+  const words = flat(ring.text)
+  const on = flat(ring.on ?? '')
+  // the words that stand: all of them where they are WORDS_MIN or fewer, else WORDS_MIN and the ` …` of their cut
+  const room = TOAST_COLS - who.length - ' on '.length - ': '.length - Math.min(words.length, WORDS_MIN + 2)
+  if (on === '' || room < NOTE_MIN) return fit(`${who}: ${words}`, TOAST_COLS)
+  return fit(`${who} on ${fit(on, room)}: ${words}`, TOAST_COLS)
+}
 
 // The keeper's pick of an ask: the ask whole if it fits, then the note in the room that is left; with no room for a note the note goes.
 // The line never holds two cut previews: where the ask had to be cut the note is gone.

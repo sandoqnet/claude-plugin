@@ -1,4 +1,4 @@
-# room-pane 0.8.63
+# room-pane 0.8.64
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -317,7 +317,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.63 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.64 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -1004,9 +1004,15 @@ of its text under it, cut to the row. It is no press, and it never scrolls: it p
 rule of the press box.
 
 An answer whose `to` holds desk/toasts is one toast, once by its id: WHO is the entry's sayer and
-the line is its text, cut to 72 columns. Two or more in one read fold to one toast, as the desk's
-items do. A run of faults is one toast, "the feed door failed: WHY". The first read of the feed
-only seeds: the answers already there at the pane's start ring nothing. Nothing is kept in a file.
+the line is its text, cut to 72 columns. A text that opens with the sayer's name and a colon
+(`mara: ...`) loses that head, so the name is said once. Where the answer holds `on` (the first
+line of what the entry answers, 60 characters at most) the toast reads `mara on the poster:
+words`; with no `on` it is `mara: words`. The words come first: `on` is cut at the end so that
+at least 24 characters of the words stand, or all of them where they are fewer. Two or more in
+one read fold to one toast, "desk: N new, waits on you, newest from" the last sayer alone, as
+the desk's items do. A run of faults is one toast, "the feed door failed: WHY". The first read
+of the feed only seeds: the answers already there at the pane's start ring nothing. Nothing is
+kept in a file.
 
 A name ask of the keeper says why. Its fence holds `from` (who said the words that hold the name:
 a seat, or `you`), `seq` (the number of its row, only when the card has one), `quote` (the line

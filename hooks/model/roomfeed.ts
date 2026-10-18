@@ -1,6 +1,6 @@
 // The room's feed (order room-feed, part A): feed/GATE.md of the run, append only. Two kinds of block, in the document form of the walks:
 //   SAYER / { feed::KIND::entry }   (34,3)  KIND his, row, answer or memory; the fence holds id, session, seat, seq and at; the body is the text whole
-//   @ID / { feed::door::answer }    (13,3)  a LATER block, after its entry, that the door wrote: to, card, rule, noul, fault and at
+//   @ID / { feed::door::answer }    (13,3)  a LATER block, after its entry, that the door wrote: to, card, rule, noul, fault, on and at
 // The entry is written before the door asks, so an entry may have no answer yet. Pure, with no `$`: the views only lay out what is read here, and the register
 // toasts what freshFeed gives. Run by `node` too: no enums, `import type`, `.ts` in imports.
 import { ID_FIRST, fenceText, parseBlocks } from './blocks.ts'
@@ -8,8 +8,9 @@ import type { Block } from './blocks.ts'
 import type { Ring } from './bell.ts'
 
 // The door's answer to one entry: the addresses it passed the entry to, the card's word, the rule that decided, and the fault that kept it from deciding.
-// `n` is the place of the block in the file, so the answers are met in the order they were written.
-export type FeedAnswer = { to: string[]; card: string; rule: string; fault: string; at: string; n: number }
+// `n` is the place of the block in the file, so the answers are met in the order they were written. `on` is the first line of what the entry answers (the
+// door's key, 60 characters at most); an answer of an older door, or one for an entry that answers nothing known, has none.
+export type FeedAnswer = { to: string[]; card: string; rule: string; fault: string; at: string; n: number; on?: string }
 
 // One entry of the feed with its answer, or none while the door has not answered.
 export type FeedEntry = { id: string; kind: string; sayer: string; session: string; seat: string; seq: string; at: string; text: string; answer?: FeedAnswer }
@@ -49,7 +50,8 @@ export function parseFeed(text: string): FeedEntry[] {
     } else if (block.che === 'door' && block.cho === 'answer') {
       const entry = byId.get(ID_FIRST.exec(block.words)?.[1] ?? '')
       if (entry === undefined) return
-      entry.answer = { to: addressesOf(block), card: wordOf(block, 'card'), rule: wordOf(block, 'rule'), fault: wordOf(block, 'fault'), at: wordOf(block, 'at'), n }
+      const on = firstLineOf(wordOf(block, 'on'))
+      entry.answer = { to: addressesOf(block), card: wordOf(block, 'card'), rule: wordOf(block, 'rule'), fault: wordOf(block, 'fault'), at: wordOf(block, 'at'), n, ...(on === '' ? {} : { on }) }
     }
   })
   return entries
@@ -79,10 +81,14 @@ export const feedLines = (entries: FeedEntry[]): FeedLine[] =>
 // The name of a line: `mara · row 41` for a row (its number), `you · his` for the rest.
 export const feedLabel = (line: FeedLine): string => `${line.sayer} · ${line.kind}${line.kind === 'row' && line.seq !== '' ? ` ${line.seq}` : ''}`
 
+// The text of a row without the sayer's name at its head: a row says `mara: the lamp test ended green` and the toast puts the name before the text, so the
+// name is cut from the text once. A text that does not begin with the name and a colon stands as it is.
+const withoutSayer = (sayer: string, text: string): string => (text.startsWith(`${sayer}:`) ? text.slice(sayer.length + 1).trimStart() : text)
+
 // What one read of the feed rings: the answers not rung for yet, in the order they were written. An answer whose `to` holds desk/toasts rings its entry's
-// sayer and text; an answer with a fault rings once for a run of faults, one that follows a fault already rung or seen at the pane's start rings nothing, and an
-// answer without a fault ends the run. The run is met from the first answer of the file, so a read needs no state of it. `ids` are the entries answered, to be
-// kept as rung.
+// sayer and text, the text without the sayer's name at its head and the sayer said `SAYER on ON` where the answer says what the entry is on; an answer with
+// a fault rings once for a run of faults, one that follows a fault already rung or seen at the pane's start rings nothing, and an answer without a fault ends
+// the run. The run is met from the first answer of the file, so a read needs no state of it. `ids` are the entries answered, to be kept as rung.
 export function freshFeed(entries: FeedEntry[], seen: ReadonlySet<string>): { rings: Ring[]; ids: string[] } {
   const rings: Ring[] = []
   const answered = entries.filter(entry => entry.answer !== undefined).sort((a, b) => (a.answer?.n ?? 0) - (b.answer?.n ?? 0))
@@ -95,7 +101,7 @@ export function freshFeed(entries: FeedEntry[], seen: ReadonlySet<string>): { ri
       run = true
     } else {
       run = false
-      if (!seen.has(entry.id) && answer.to.includes(TOASTS)) rings.push({ who: entry.sayer, text: entry.text })
+      if (!seen.has(entry.id) && answer.to.includes(TOASTS)) rings.push({ who: entry.sayer, text: withoutSayer(entry.sayer, entry.text), ...(answer.on === undefined ? {} : { on: answer.on }) })
     }
   }
   return { rings, ids: answered.map(entry => entry.id) }

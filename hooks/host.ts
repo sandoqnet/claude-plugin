@@ -33,7 +33,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.63'
+export const VERSION = '0.8.64'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
 export const SANDOQ_OPTION_NAME = 'sandoq'
 

@@ -10,8 +10,8 @@
 // no session: a card names its seat in the fence of its root.
 import { blockWords, fenceText, idOf, parentOf, parseBlocks, preview } from './blocks.ts'
 import type { Block } from './blocks.ts'
-import { gatesOf } from './gate.ts'
-import type { Decision, Draft, Gate } from './gate.ts'
+import { gatesOf, reasonOf } from './gate.ts'
+import type { AskWhy, Decision, Draft, Gate } from './gate.ts'
 import { ageWords, ulidMs } from './profile.ts'
 import type { WalkText } from './profile.ts'
 import type { CatalogEntry } from './shelf.ts'
@@ -46,6 +46,8 @@ export type SeatWait = {
   choices: string[]
   lean: string
   draft?: Draft
+  // Why the keeper asked a name (from, quote, what each choice does), where the ask's fence holds it.
+  reason?: AskWhy
   // A card said TO this seat (order C3): its wait is on its receiver until a card of that seat answers it. `by` is the seat
   // that said it ('' for his own voice). It has no ask: `askId` names the receiver, `form` is true and no choice is offered.
   said?: { by: string }
@@ -130,7 +132,6 @@ export const roleTold = (seatsText: string, name: string): string => seatList(se
 
 // The seat whose line in seats.md names this folder (the line's folder is relative to the room, so the folder ends
 // with it, the longest line first); with none, the folder's own last name.
-// folderHasLine of bridge.ts repeats this folder match: the two change together.
 export function seatName(folder: string, seatsText: string): string {
   const path = folder.replace(/\/+$/, '')
   let best: SeatEntry | undefined
@@ -152,8 +153,9 @@ export function seatOfAsk(ask: Block, root: Block | undefined, here: string): st
   return seat === '' ? here : seat
 }
 
-// The seat that asks: the fence `from` when set, else ''.
-export const fromOfAsk = (ask: Block): string => wordOf(ask, 'from')
+// The seat that asks: the fence `from` when set, else ''. An ask that holds a `quote` is the keeper's name ask, whose `from` is who said the words that hold the name
+// (model/gate.ts reasonOf), not a seat that asks: it is no seat's question.
+export const fromOfAsk = (ask: Block): string => (reasonOf(ask) === undefined ? wordOf(ask, 'from') : '')
 
 type Asked = { wait: SeatWait; decision?: Decision }
 
@@ -221,6 +223,7 @@ function asksOf(state: SeatState): Asked[] {
         choices,
         lean: gate?.lean ?? '',
         ...(gate?.draft === undefined ? {} : { draft: gate.draft }),
+        ...(gate?.reason === undefined ? {} : { reason: gate.reason }),
       }
       out.push({ wait, decision: gate?.decision })
     }

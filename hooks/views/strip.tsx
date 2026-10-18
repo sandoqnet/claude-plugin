@@ -5,7 +5,7 @@
 // takes (STRIP.rows) are the pane's LINK_ROWS. The terminal draws none of this.
 import { settingsTitle } from './settingslist'
 import { pressBox, pressHigh, pressWidth } from './press'
-import { DOOR_TITLE, PLAYS_TITLE, ROOM_TITLE } from './roomcard'
+import { DOOR_TITLE, FEED_TITLE, PLAYS_TITLE, ROOM_TITLE } from './roomcard'
 import { SPACE } from './space'
 import { STRIP, THEME, besideOf, fitted } from './theme'
 import type { Face, Nav, Ui } from './types'
@@ -68,7 +68,7 @@ export function stripTitleOf(nav: Nav, seat: string, face: Face): string {
     case 'settings':
       return settingsTitle(nav.section)
     case 'room':
-      return nav.card === 'door' ? DOOR_TITLE : nav.card === 'plays' ? PLAYS_TITLE : ROOM_TITLE
+      return nav.card === 'door' ? DOOR_TITLE : nav.card === 'plays' ? PLAYS_TITLE : nav.card === 'feed' ? FEED_TITLE : ROOM_TITLE
     // a seat's shelf and its record are named as the Back of the record names that shelf (`‹ NAME shelf`)
     case 'shelf':
       return nav.of === undefined || nav.of === '' ? 'Shelf' : `${nav.of} shelf`

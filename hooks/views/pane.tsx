@@ -19,6 +19,7 @@ import type { Settings } from '../model/settings'
 import { SHOWN_CARDS } from '../model/shelf'
 import { THIS_SEAT, askedWait, asideLast, level, seatFace, seatWindow, waitsLine, waitsOnHim } from '../model/seat'
 import type { SeatState } from '../model/seat'
+import { feedLines } from '../model/roomfeed'
 import { isIdle, roomOf, sizeOf as bytesWords } from '../model/roomplace'
 import { MAKE_BUTTON, MAKING, START_BUTTON, STARTING, linesAtWord, makeWords } from '../model/roomstart'
 import { freshCount, whoseOf } from '../model/shelfreads'
@@ -39,7 +40,7 @@ import { LOOK } from './look'
 import { bannerView, olderWords, operatorLensView, operatorView } from './operator'
 import { profileView } from './profile'
 import { roomView } from './room'
-import { doorView, playsView, roomCardView } from './roomcard'
+import { doorView, playsView, roomCardView, roomFeedView } from './roomcard'
 import { sceneElement } from './scene'
 import { LETTER_TEXT, levelView, seatView } from './seat'
 import type { SeatProps } from './seat'
@@ -718,6 +719,7 @@ function publicView(state: RoomState) {
         choices: wait.choices,
         lean: wait.lean,
         ...(wait.draft === undefined ? {} : { draft: { words: stripUlid(wait.draft.choice), by: wait.draft.by } }),
+        ...(wait.reason === undefined ? {} : { reason: wait.reason }),
       })),
       others: face.others,
       answered: face.answeredToday,
@@ -1038,6 +1040,8 @@ const roomPlace = (state: RoomState) => {
         actions: { ...(actions.checkVersions === undefined ? {} : { check: () => actions.checkVersions?.() }), tap: actions.tap, openPage: pageOf => actions.openPage?.(pageOf), page },
       })
     }
+    const entriesOfFeed = state.feed ?? []
+    if (card === 'feed') return roomFeedView({ ...common, lines: feedLines(entriesOfFeed), page: pages.feed ?? 0, actions: { page } })
     const rules = rulesToday(rulesText, heard, now, zone).filter(rule => !takenOff.includes(rule.id))
     return roomCardView({
       ...common,
@@ -1051,6 +1055,7 @@ const roomPlace = (state: RoomState) => {
         records: kept.length,
         rules: rules.length,
         discs: room.discs.length,
+        feed: entriesOfFeed.length,
         pane: VERSION,
         where: roomWhere,
       },
@@ -1061,6 +1066,7 @@ const roomPlace = (state: RoomState) => {
         openSeats: () => actions.open({ view: 'level' }),
         openShelf: () => actions.open({ view: 'shelf', by: 'kind' }),
         openPlays: () => actions.open({ view: 'room', card: 'plays' }),
+        openFeed: () => actions.open({ view: 'room', card: 'feed' }),
         openVersions: () => actions.open({ view: 'settings', section: 'versions' }),
         page,
       },

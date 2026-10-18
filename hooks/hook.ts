@@ -2,41 +2,37 @@
 // (Stop) and `node hook.ts memory` (PostToolUse of Write, Edit and MultiEdit). Whatever goes wrong, the exit is 0 and
 // nothing is printed: the room never blocks the user's prompt or his turn's end. Thin by design: the pure
 // parts are in bridge.ts, tested there.
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 
 import {
+  FEED_MS,
   WAIT_MS,
   WAIT_STEP_MS,
   answerArgv,
   asksOf,
-  bareIdFrom,
   cardIdFrom,
-  doorDownContext,
-  feedArgv,
-  feedWord,
+  feedinArgv,
   findRoomFrom,
   findSandoq,
   isBridgeOff,
   isMarked,
   isReadWalk,
-  makeCard,
-  memoryArgv,
+  memoryText,
+  noCardContext,
   parseMemory,
   parseStop,
   parseSubmit,
   readingContext,
-  refusedContext,
-  seatOfFolder,
-  seatsPathOf,
   sessionOf,
   sessionsAfter,
   sessionsPathOf,
   submitOutput,
+  turnRowsOf,
   walkPath,
   workFolderOf,
 } from './bridge.ts'
-import type { Ask, Ran, Room } from './bridge.ts'
+import type { Ask, FeedKind, FeedRow, Ran, Room } from './bridge.ts'
 import { newestIds } from './model/shelf.ts'
 
 const PROCESS_MS = 8000
@@ -70,10 +66,16 @@ function findRoom(cwd: string): Room | undefined {
   return sandoq === undefined ? undefined : { ...room, sandoq }
 }
 
-function run(room: Room, argv: string[], input: string, cwd = workFolderOf(room)): Ran {
+function run(room: Room, argv: string[], input: string, timeout = PROCESS_MS): Ran {
   const env = { ...process.env, PATH: `${room.path === '' ? '' : `${room.path}:`}${process.env.PATH ?? ''}` }
-  const done = spawnSync(argv[0], argv.slice(1), { cwd, env, input, encoding: 'utf8', timeout: PROCESS_MS })
+  const done = spawnSync(argv[0], argv.slice(1), { cwd: workFolderOf(room), env, input, encoding: 'utf8', timeout })
   return { ok: done.status === 0, out: `${done.stdout ?? ''}`, err: `${done.stderr ?? ''}`, status: done.status }
+}
+
+// One entry on the room's feed: the program feedin of the room in its work folder, the text on its input, the session's folder and id
+// named by its flags (the program names the seat by the folder). Never a second try, never another road.
+function feed(room: Room, kind: FeedKind, text: string, cwd: string, session: string, row?: FeedRow, timeout = PROCESS_MS): Ran {
+  return run(room, feedinArgv(room, kind, cwd, session, row), text, timeout)
 }
 
 const sleep = (ms: number): void => {
@@ -114,29 +116,52 @@ function noteSession(room: Room, cwd: string, session: string): void {
   }
 }
 
-function submit(raw: string): string {
+// The child that feeds a turn: this script again, the word `rows`, the hook's own input on its input. It outlives this hook (detached, no
+// stdio of its own) and its work is no fault of the hook's.
+function startRows(raw: string): Promise<void> {
+  return new Promise(resolve => {
+    try {
+      const child = spawn(process.execPath, [...process.execArgv, process.argv[1], 'rows'], { detached: true, stdio: ['pipe', 'ignore', 'ignore'], env: process.env })
+      child.on('error', () => resolve())
+      child.stdin.on('error', () => resolve())
+      child.stdin.end(raw, () => {
+        child.unref()
+        resolve()
+      })
+    } catch {
+      resolve()
+    }
+  })
+}
+
+// The child's work: each row of the turn, oldest first, fed alone as kind row with its sayer and number (the sayer `none` when the line has
+// no plain one). A row that fails is no reason to drop the rows after it. A row gets FEED_MS, over the 30 seconds of feedin's call to Jev: a feedin
+// cut sooner would lose the answer and the card after the entry was written.
+function rows(raw: string): void {
+  const input = parseSubmit(raw)
+  if (!input || isBridgeOff(process.env)) return
+  const cwd = input.cwd || process.cwd()
+  const room = findRoom(cwd)
+  const turn = turnRowsOf(input.prompt)
+  if (!room || turn === undefined) return
+  for (const row of turn) feed(room, 'row', row.line, cwd, input.session, { sayer: row.sayer, seq: row.seq }, FEED_MS)
+}
+
+function submit(raw: string): string | Promise<string> {
   const input = parseSubmit(raw)
   if (!input || isBridgeOff(process.env)) return ''
   const room = findRoom(input.cwd || process.cwd())
   if (!room) return ''
   const cwd = input.cwd || process.cwd()
   noteSession(room, cwd, input.session)
-  let id: string
-  if (isMarked(room)) {
-    // A marked room: ONE call, `sandoq room card`, run in the session's folder (sandoq names the seat by it), the prompt on its
-    // input. It rings the door itself, so no feed is run and the hook names no seat. An id with exit 1 is a card made whose ring
-    // failed: its reading is waited for as ever. With no id the session gets one line of context: the door is down, or any other
-    // refusal (the words The room did not take this message, then the last line of the err, scrubbed of a path).
-    const made = makeCard(room, input.session, '', input.prompt, (argv, text) => run(room, argv, text, cwd))
-    id = bareIdFrom(made.out)
-    if (id === '') return submitOutput(doorDownContext(made) || refusedContext(made))
-  } else {
-    const seat = seatOfFolder(room, cwd, read(seatsPathOf(room)))
-    const made = makeCard(room, input.session, seat, input.prompt, (argv, text) => run(room, argv, text))
-    id = made.ok ? cardIdFrom(made.out) : ''
-    if (id === '') return ''
-    run(room, feedArgv(room, feedWord(id)), '')
-  }
+  // A wake's turn is the room's rows, not his words, and every row must land: ONE detached child, `node hook.ts rows`, gets the turn on its
+  // input and feeds each row in order with no budget; this hook returns at once, with no wait and no context.
+  if (turnRowsOf(input.prompt) !== undefined) return startRows(raw).then(() => '')
+  // His words: ONE entry, kind his, the prompt the whole input. The door may make a card of it, and then its word is on the out and its reading
+  // is waited for as ever. With no word the session gets no context, or ONE line: the entry waits on the feed (exit 1), or the room did not take it.
+  const made = feed(room, 'his', input.prompt, cwd, input.session, undefined, FEED_MS)
+  const id = cardIdFrom(made.out)
+  if (id === '') return submitOutput(noCardContext(made))
   let walk = ''
   for (let waited = 0; waited <= WAIT_MS; waited += WAIT_STEP_MS) {
     walk = read(walkPath(room, id))
@@ -151,21 +176,19 @@ function stop(raw: string): void {
   if (!input || isBridgeOff(process.env)) return
   const room = findRoom(input.cwd || process.cwd())
   if (!room) return
-  // answer.py waits its own bound for the turn's route, so the hook's time is its.
-  const env = { ...process.env, PATH: `${room.path === '' ? '' : `${room.path}:`}${process.env.PATH ?? ''}` }
-  const argv = answerArgv(room, input.session)
-  spawnSync(argv[0], argv.slice(1), { cwd: workFolderOf(room), env, input: input.answer, encoding: 'utf8', timeout: WAIT_MS + PROCESS_MS })
+  // answer.py alone, as ever: it waits its own bound for the turn's route, writes the answer entry on the feed itself, and returns at once when
+  // the session's newest entry has no card. The bridge feeds nothing at Stop.
+  run(room, answerArgv(room, input.session), input.answer, WAIT_MS + PROCESS_MS)
 }
 
-// After a Write, Edit or MultiEdit of a file of Claude's memory folder: ONE `sandoq room say --session ID memory: FILE`, run in the session's folder as
-// the submit hook runs its card. The path is text here: nothing in this function opens, stat's or reads the file.
+// After a Write, Edit or MultiEdit of a file of Claude's memory folder: ONE entry, kind memory, its text `memory: FILE`, fed as the submit hook feeds
+// his words. The path is text here: nothing in this function opens, stat's or reads the file.
 function memory(raw: string): void {
   const input = parseMemory(raw, process.env.HOME ?? '')
   if (!input || isBridgeOff(process.env)) return
   const cwd = input.cwd || process.cwd()
   const room = findRoom(cwd)
-  const argv = memoryArgv(room, input.session, input.file)
-  if (room && argv.length > 0) run(room, argv, '', cwd)
+  if (room) feed(room, 'memory', memoryText(input.file), cwd, input.session)
 }
 
 async function main(): Promise<void> {
@@ -177,8 +200,10 @@ async function main(): Promise<void> {
     process.stdin.on('error', () => resolve(data))
   })
   if (process.argv[2] === 'submit') {
-    const out = submit(raw)
+    const out = await submit(raw)
     if (out !== '') process.stdout.write(out)
+  } else if (process.argv[2] === 'rows') {
+    rows(raw)
   } else if (process.argv[2] === 'stop') {
     stop(raw)
   } else if (process.argv[2] === 'memory') {

@@ -3,7 +3,6 @@
 import { blockWords, parseBlocks } from './model/blocks.ts'
 import type { Block } from './model/blocks.ts'
 import { scrub } from './model/draws.ts'
-import { seatList, seatName } from './model/seat.ts'
 import { choicesText, harnessTag, openAsks } from './model/walk.ts'
 
 // ---- the plugin's settings. The host hands each option to a hook as CLAUDE_PLUGIN_OPTION_<KEY>.
@@ -11,6 +10,9 @@ export const OFF_WORDS = ['off', 'no', 'false', '0']
 export const DEFAULT_GATE = 'builder'
 export const WAIT_MS = 10_000
 export const WAIT_STEP_MS = 200
+// The bound of one call of feedin that may ask Jev (his words and a row): feedin's own call to Jev is bound at 30 seconds, and a feedin cut before
+// it answers loses the answer and the card. The submit hook is given this and the wait for the reading, with room over (hooks.json).
+export const FEED_MS = 35_000
 // A session's id: letters, digits, dashes and underscores, and never a dash first (sandoq would read it as a flag after `--session`). ONE
 // shape for the hook that writes the ids, the pane that reads them and the pane's say.
 const SESSION_ID = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/
@@ -181,96 +183,71 @@ export function sandoqCandidates(env: Env): string[] {
 // The first place of the four that is a file, as `isFile` says; nothing when none is.
 export const findSandoq = (env: Env, isFile: (path: string) => boolean): string | undefined => sandoqCandidates(env).find(isFile)
 
-// ---- the seat a hook speaks for: the session's folder named as the pane names it, through seats.md of the room shelf.
-export const SEATS_PATH = 'shelves/room/seats.md'
-export const seatsPathOf = (room: Room): string => `${room.run.replace(/\/+$/, '')}/${SEATS_PATH}`
-
 // The room's own folder: where room.sh stands, or, for the live room's room.sh, the folder that holds `.kairos`.
 export const roomFolderOf = (room: Room): string => room.dir.replace(/\/+$/, '').replace(/\/\.kairos\/runtime\/room$/, '') || '/'
-
-// Whether a line of seats.md names this folder: the line's folder, relative to the room, is the folder or its end.
-// seatName of model/seat.ts picks the line; this only tells that one is there, over the same seatList reading.
-// It repeats the folder match of seatName: the two change together.
-const folderHasLine = (folder: string, seatsText: string): boolean =>
-  seatList(seatsText).some(seat => {
-    const rel = seat.folder.replace(/^(\.\/)+/, '').replace(/^\/+|\/+$/g, '')
-    return rel !== '' && rel !== '.' && (folder === rel || folder.endsWith(`/${rel}`))
-  })
-
-// This seat's name for card.py --seat: the name of the line of seats.md that names the session's folder, and nothing
-// else (order B-C1): '' at the room's own folder (the room's seat), and '' for a folder with no line, so its card is
-// the person's. A folder under the room is read relative to it, a folder outside it as it is. The pane's own naming of
-// what it draws (seatName, which falls back to the folder's last name) is not this rule.
-export function seatOfFolder(room: Room, cwd: string, seatsText: string): string {
-  const folder = cwd.replace(/\/+$/, '') || '/'
-  const base = roomFolderOf(room)
-  if (folder === base) return ''
-  const inside = base === '/' ? folder.slice(1) : folder.startsWith(`${base}/`) ? folder.slice(base.length + 1) : ''
-  const path = inside === '' ? folder : inside
-  return folderHasLine(path, seatsText) ? seatName(path, seatsText) : ''
-}
 
 // ---- the argv the hooks run. A room found by room.sh runs its programs in the run folder, as it always did. A marked
 // room runs each as `sandoq room run PROGRAM WORDS...` with the room's folder as the working folder: sandoq takes the
 // room from the nearest mark, runs the program in the run folder under the room's PATH, and passes the input through.
 // The words are the same as today's. The hook knows no layout under the mark for a run. The program word is the bare
-// name: sandoq refuses a dot in it and takes the file of that name, else with sh, else with py.
-export const MARK_PROGRAMS = { card: 'card', feed: 'feed', answer: 'answer' }
+// name: sandoq refuses a dot in it and takes the file of that name, else with sh, else with py. (card and feed are the
+// pane's own egress, host.ts; the bridge hooks run feedin and answer.)
+export const MARK_PROGRAMS = { card: 'card', feed: 'feed', answer: 'answer', feedin: 'feedin' }
 const viaSandoq = (room: Room, program: string, words: string[]): string[] => [room.sandoq ?? SANDOQ_NAME, 'room', 'run', program, ...words]
 
 // The folder a hook runs a program in: the room's own folder for a mark, the run folder for room.sh.
 export const workFolderOf = (room: Room): string => (isMarked(room) ? room.dir : room.run)
 
-// The card of a prompt. A marked room has one verb for his words: `sandoq room card`, then the flag --session and the id when the
-// session has one, the text the whole input. It takes the seat from the folder it runs in, so the hook names none: the seat word
-// is not read for a marked room. card.py of a room found by room.sh takes --seat only when this seat has a name.
-export const cardArgv = (room: Room, session: string, seat = ''): string[] =>
-  isMarked(room)
-    ? [room.sandoq ?? SANDOQ_NAME, 'room', 'card', ...(session === '' ? [] : ['--session', session])]
-    : ['python3', `${room.programs}/card.py`, room.gate, '--session', session, ...(seat === '' ? [] : ['--seat', seat])]
 // A program of the room as the hook runs it: its argv and its stdin, whether it exited 0, what it printed on its out and its err,
-// and its exit code (the err and the code are for the verb of a marked room).
+// and its exit code.
 export type Ran = { ok: boolean; out: string; err?: string; status?: number | null }
-export type Runner = (argv: string[], input: string) => Ran
 
-// The card of a prompt. An older room's card.py has no --seat and refuses the flag, and a refused run makes no card,
-// so a run with a seat that is not ok is run once more without it. A marked room's verb is run once, never twice.
-export function makeCard(room: Room, session: string, seat: string, prompt: string, runner: Runner): Ran {
-  const made = runner(cardArgv(room, session, seat), prompt)
-  return made.ok || seat === '' || isMarked(room) ? made : runner(cardArgv(room, session), prompt)
+// ---- the feed road (order room feed, part B). The room's feedin program takes everything the bridge sees and puts it on the
+// room's FEED; the room's door decides whether an entry makes a card. `feedin GATE --kind row|his|answer|memory [--folder DIR]
+// [--session ID] [--sayer S --seq N]`, the text on its input. The seat is the seats file's line naming DIR. --sayer and --seq go
+// together and only with kind row. Out: the card's word (a dot and the ULID) when the door made a card, else nothing, exit 0 both
+// ways. A door fault or no key: no card, the entry waits on the feed, exit 1 and one line on the err. A usage fault: exit 2.
+export type FeedKind = 'row' | 'his' | 'answer' | 'memory'
+export type FeedRow = { sayer: string; seq: string }
+
+export function feedinArgv(room: Room, kind: FeedKind, folder: string, session: string, row?: FeedRow): string[] {
+  const words = ['--kind', kind, ...(folder === '' ? [] : ['--folder', folder]), ...(session === '' ? [] : ['--session', session]), ...(row ? ['--sayer', row.sayer, '--seq', row.seq] : [])]
+  return isMarked(room) ? viaSandoq(room, MARK_PROGRAMS.feedin, [room.gate, ...words]) : ['python3', `${room.programs}/feedin.py`, room.gate, ...words]
 }
 
 // What `sandoq room card` prints on its out: the card's id, bare, no dot, on one line. A line of another shape is no id.
+// (The pane's own say reads it, register.tsx.)
 export function bareIdFrom(output: string): string {
   const word = output.trim().split('\n').at(-1)?.trim() ?? ''
   return /^[0-9A-Za-z]{20,}$/.test(word) ? word : ''
 }
 
-// What it says on its err when no door answers: nothing is sent and no card is made (exit 1, no id).
-export const NO_DOOR_LINE = 'no door answers'
-export const DOOR_DOWN_CONTEXT = "The room's door is down, this message made no card."
-// The one line of context the hook gives the session when the verb made no card because the door is down, else ''.
-export function doorDownContext(made: Ran): string {
-  if (made.status !== 1 || bareIdFrom(made.out) !== '') return ''
-  const line = (made.err ?? '').trim().split('\n').at(-1) ?? ''
-  return line.includes(NO_DOOR_LINE) ? DOOR_DOWN_CONTEXT : ''
-}
+// The status of a run: its exit code; a run that did not start (a timeout, no such program) has none.
+const statusOf = (made: Ran): number | null => (made.status !== undefined ? made.status : made.ok ? 0 : null)
 
-// Any other refusal that made no card (an older sandoq with no such verb, a usage error, a run that did not start): the session
-// gets ONE line, these words and the last line of the err with no path of this machine in it. With no err the words stand alone.
+// A his prompt whose entry made no card. Exit 0 and no word: the door took the entry and made none, so no context. Exit 1 with feedin's own
+// err line (the last line of the err begins `feedin:`): the entry waits on the feed, ONE line, these words and that line with no path of this
+// machine in it. Any other refusal (a usage fault, an exit 1 of a disc with no feedin, a run that did not start): refusedContext.
+export const FEED_WAITS = "This message waits on the room's feed:"
+export const FEEDIN_ERR = 'feedin:'
 export const REFUSED_CONTEXT = 'The room did not take this message.'
 export function refusedContext(made: Ran): string {
   const line = scrub((made.err ?? '').trim().split('\n').at(-1)?.trim() ?? '').slice(0, 200)
   return line === '' ? REFUSED_CONTEXT : `${REFUSED_CONTEXT} ${line}`
 }
+export function noCardContext(made: Ran): string {
+  const status = statusOf(made)
+  if (status === 0) return ''
+  const last = (made.err ?? '').trim().split('\n').at(-1)?.trim() ?? ''
+  if (status !== 1 || !last.startsWith(FEEDIN_ERR)) return refusedContext(made)
+  return `${FEED_WAITS} ${scrub(last).slice(0, 200)}`
+}
 
-export const feedArgv = (room: Room, word: string): string[] =>
-  isMarked(room) ? viaSandoq(room, MARK_PROGRAMS.feed, ['-r', room.gate, word]) : ['sh', `${room.programs}/feed.sh`, '-r', room.gate, word]
 export const answerArgv = (room: Room, session: string): string[] =>
   isMarked(room) ? viaSandoq(room, MARK_PROGRAMS.answer, [room.gate, session]) : ['python3', `${room.programs}/answer.py`, room.gate, session]
 export const walkPath = (room: Room, id: string): string => `${room.run}/walks/${room.gate}/${id}.md`
 
-// card.py prints the card's word, a dot and its ULID, on one line.
+// feedin (and card.py) print the card's word, a dot and its ULID, on one line.
 export function cardIdFrom(output: string): string {
   const word = output.trim().split('\n').at(-1)?.trim() ?? ''
   return /^\.[0-9A-Za-z]{20,}$/.test(word) ? word.slice(1) : ''
@@ -304,6 +281,35 @@ export function parseSubmit(raw: string): SubmitInput | undefined {
   }
 }
 
+// ---- a wake's turn (order room feed, B1). The turn of sessionseat.ts turnText opens `Room ROOM, N rows for SEAT.`, then the lines that say how
+// to answer, then each row as its number, two spaces and its line. Such a prompt is the room's rows and not his words: each row is fed alone,
+// kind row; the head and the answering lines are never fed. A line that is no row and stands after a row goes on that row (a row's line may be
+// more than one line). The sayer is the word before the line's first colon when it is letters, digits, dashes and underscores alone (the names
+// feedin takes after --sayer, else it exits 2) and no dash first (a flag word after a flag); a line with none has the sayer `none`, and goes
+// with its number all the same.
+export const NO_SAYER = 'none'
+const SAYER_WORD = SESSION_ID
+export type TurnRow = { seq: string; line: string; sayer: string }
+const TURN_HEAD = /^Room [A-Za-z0-9][A-Za-z0-9_.-]*, \d+ rows? for [A-Za-z0-9][A-Za-z0-9_.-]*\./
+const TURN_ROW = /^(\d+) {2}(\S.*)$/
+
+// The rows of a wake's turn, oldest first; undefined for a prompt that is no turn.
+export function turnRowsOf(prompt: string): TurnRow[] | undefined {
+  const [head = '', ...rest] = prompt.trimStart().split('\n')
+  if (!TURN_HEAD.test(head)) return undefined
+  const rows: { seq: string; line: string }[] = []
+  for (const text of rest) {
+    const found = text.match(TURN_ROW)
+    if (found) rows.push({ seq: found[1], line: found[2] })
+    else if (rows.length > 0) rows[rows.length - 1].line += `\n${text}`
+  }
+  return rows.map(({ seq, line }) => {
+    const whole = line.trimEnd()
+    const word = whole.slice(0, Math.max(whole.indexOf(':'), 0))
+    return { seq, line: whole, sayer: SAYER_WORD.test(word) ? word : NO_SAYER }
+  })
+}
+
 export type StopInput = { session: string; answer: string; cwd: string }
 
 // The last answer of the turn, whole; an empty one is no input. The transcript is never read.
@@ -319,8 +325,8 @@ export function parseStop(raw: string): StopInput | undefined {
   }
 }
 
-// ---- the memory hook (order MH): after a Write, Edit or MultiEdit of a file of Claude's memory folder it makes ONE card, `sandoq room say --session ID
-// memory: FILE`, FILE the file's name alone. The rule of the folder is the importer's (`found_in` of the claude disc's import.py): the home's
+// ---- the memory hook (order MH): after a Write, Edit or MultiEdit of a file of Claude's memory folder it feeds ONE entry, kind memory, its text
+// `memory: FILE`, FILE the file's name alone. The rule of the folder is the importer's (`found_in` of the claude disc's import.py): the home's
 // `.claude/projects/PROJECT/memory/FILE`, the file directly in it, FILE of letters, digits and . _ - ending in .md, never MEMORY.md, the
 // index. The importer FINDS the project (the one with a session of the room's folder); the hook only reads the path's shape, any PROJECT,
 // and the gate says one line for a file of a project that is not the room's. The path is text: the file is never opened, stat'ed or read.
@@ -357,9 +363,8 @@ export function parseMemory(raw: string, home: string): MemoryInput | undefined 
   }
 }
 
-// The call: one argv list, no shell, for a marked room with a sandoq found; [] for any other room or none (the old room.sh has no `room say`).
-export const memoryArgv = (room: Room | undefined, session: string, file: string): string[] =>
-  room && isMarked(room) && room.sandoq !== undefined ? [room.sandoq, 'room', 'say', '--session', session, MEMORY_WORD, file] : []
+// The text of the entry, on the input of feedin (kind memory).
+export const memoryText = (file: string): string => `${MEMORY_WORD} ${file}`
 
 // ---- the session ids of a folder (order YS, a contract with the pane's Your cards). The submit hook writes, at each message and
 // before the card is made, `room-pane-sessions.json` at the top of the run folder, beside the pane's pane.json: `{"folders": {FOLDER: [ID,

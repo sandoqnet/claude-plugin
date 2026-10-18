@@ -33,7 +33,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.62'
+export const VERSION = '0.8.63'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
 export const SANDOQ_OPTION_NAME = 'sandoq'
 
@@ -310,7 +310,7 @@ const programArgv = (host: Host, program: string, ext: 'py' | 'sh', words: strin
     : [ext === 'py' ? 'python3' : 'sh', `${host.programs}/${program}.${ext}`, ...words]
 
 // A card that replies to a card (`--re .ULID`) or says about a record (`--about @ULID`): card.py in the
-// run folder with the text on its input, as bridge.ts's cardArgv does for a hook; it prints the card's word.
+// run folder with the text on its input; it prints the card's word.
 // The pane adds the dot and the @ to the bare id.
 export const localReplyArgv = (host: Host, cardId: string, text: string): string[] =>
   inRunArgv(host, programArgv(host, MARK_PROGRAMS.card, 'py', [host.gate, '--re', `.${cardId}`]), text)
@@ -321,7 +321,7 @@ export const localAboutArgv = (host: Host, recordId: string, text: string): stri
 // and would make the text an answer under a seat's open wake. A room found by room.sh keeps card.py with the gate alone.
 export const barCardArgv = (host: Host, text: string): string[] =>
   host.marked ? inRunArgv(host, [host.sandoq ?? '', 'room', 'card', '--no-seat'], text) : inRunArgv(host, programArgv(host, MARK_PROGRAMS.card, 'py', [host.gate]), text)
-// feed.sh offers the card's word to the room and rings, as bridge.ts's feedArgv does.
+// feed.sh offers the card's word to the room and rings.
 export const localFeedArgv = (host: Host, word: string): string[] =>
   inRunArgv(host, programArgv(host, MARK_PROGRAMS.feed, 'sh', ['-r', host.gate, word]))
 

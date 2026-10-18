@@ -1,6 +1,6 @@
 {
   "name": "sandoq",
-  "version": "0.8.62",
+  "version": "0.8.63",
   "description": "A live pane, band and toasts for the room's run folder: cards, walks, taps, the seat's answers and the shelf; the bridge hooks make each message a card",
   "author": { "name": "sandoq" },
   "commands": ["./hooks/seat-open.md", "./hooks/seat-shut.md"],

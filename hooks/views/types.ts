@@ -6,6 +6,7 @@ import type { DeskCard, Group as DeskGroup } from '../model/desk.ts'
 import type { Expanded, MoreWhat } from '../model/expanded.ts'
 import type { Lens } from '../model/feed.ts'
 import type { MotionRow, PendingTap } from '../model/motion.ts'
+import type { FeedEntry } from '../model/roomfeed.ts'
 import type { SecretsCard } from '../model/secrets.ts'
 import type { SettingKey, Settings } from '../model/settings.ts'
 import type { CatalogEntry, Disc } from '../model/shelf.ts'
@@ -35,7 +36,7 @@ export type Nav =
   | { view: 'settings'; section?: SettingsSection }
   // The room card (order DP, P4): its rows, or one card of it: `door`, or `plays` (the discs stand once, here); `from` is the seat the
   // card was opened from, where its Back goes (none: the room card).
-  | { view: 'room'; card?: 'door' | 'plays'; from?: string }
+  | { view: 'room'; card?: 'door' | 'plays' | 'feed'; from?: string }
   | { view: 'seat'; name: string }
   | { view: 'level' }
   // Today's answers, the dock's Answered place (an app's; the terminal reaches them by "Answered today N ›").
@@ -281,6 +282,8 @@ export type PaneProps = {
   programTexts?: Record<string, string>
   bytes?: number
   roomOpen?: string
+  // The room's feed (order room-feed, part A): the entries of feed/GATE.md with their answers, oldest first. The feed card of the room card lays them out.
+  feed?: FeedEntry[]
   // The room card (order DP, P4): the last two parts of the session's folder (its Folder row), what the last check of the discs gave
   // (its hour and each disc's state word, none before a check), and the nav the open place was opened from (the room card or none), so
   // a Back says where he CAME from.

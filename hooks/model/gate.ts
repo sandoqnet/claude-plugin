@@ -2,7 +2,7 @@
 // the decision with the door's word and the rule that answered. Pure, with no `$`, and it imports no view
 // and no host module. A key the walk does not hold is left out of the value, never made up. Run by `node`
 // too: no enums, `import type`, `.ts` in imports.
-import { ID_FIRST, blockWords, fenceText, idOf, namesWords, parentOf, parseBlocks } from './blocks.ts'
+import { ID_FIRST, blockWords, fenceText, idOf, namesWords, parentOf, parseBlocks, stripUlid } from './blocks.ts'
 import type { Block } from './blocks.ts'
 
 const AT_ID = /@([0-9A-Za-z]{20,})/
@@ -29,6 +29,47 @@ export type Decision = {
   quotes?: string[]
 }
 
+// Why a name ask was asked (order room-feed, part A, item 3): the door writes three keys in the fence of the keeper's name ask. `from` is who said the words that hold
+// the name (the card's sayer, a seat, or `you` for his own message) and `seq` the number of its row, beside it, only when the card has one; `quote` is the card's line
+// that holds the word, at most 120 characters; `means` is a list as long as `choices`, in the same order, with one line for each choice: what it does. The pane has no
+// words of its own for a choice: where `means` is missing or its length is not that of `choices`, the choices stand alone.
+export type AskWhy = { from: string; seq: string; quote: string; means: { choice: string; words: string }[] }
+
+export const QUOTE_MOST = 120
+
+// A quote cut to QUOTE_MOST characters at a word, with an ellipsis where it was longer.
+function quoteCut(text: string): string {
+  const one = text.replace(/\s+/g, ' ').trim()
+  if (one.length <= QUOTE_MOST) return one
+  const cut = one.slice(0, QUOTE_MOST - 2)
+  const at = cut.lastIndexOf(' ')
+  return `${(at > 0 ? cut.slice(0, at) : cut).trimEnd()} …`
+}
+
+// The reason of an ask, none unless its fence holds a `quote`: the keys come together, and `from` alone is the seat that raises an ask (model/seat.ts).
+export function reasonOf(ask: Block): AskWhy | undefined {
+  const quote = typeof ask.fence.quote === 'string' ? quoteCut(ask.fence.quote) : ''
+  if (quote === '') return undefined
+  const offered = Array.isArray(ask.fence.choices) ? ask.fence.choices.map(String) : []
+  const means = ask.fence.means
+  const lines = Array.isArray(means) && means.length === offered.length ? means.map(String) : []
+  const from = typeof ask.fence.from === 'string' ? ask.fence.from.trim() : ''
+  const seq = from === '' || (typeof ask.fence.seq !== 'number' && typeof ask.fence.seq !== 'string') ? '' : String(ask.fence.seq).trim()
+  return {
+    from,
+    seq,
+    quote,
+    means: offered.map((choice, at) => ({ choice: stripUlid(choice), words: (lines[at] ?? '').replace(/\s+/g, ' ').trim() })).filter(item => item.words !== ''),
+  }
+}
+
+// The lines a reason draws: `From mara, row 41` (or `From you`), the quote in quotes, then each choice with its means, `new: a person record for Kai ...`. A line the
+// fence does not hold is left out.
+export function reasonText(reason: AskWhy): string[] {
+  const from = reason.from === '' ? '' : `From ${reason.from}${reason.seq === '' ? '' : `, row ${reason.seq}`}`
+  return [from, `"${reason.quote}"`, ...reason.means.map(item => `${item.choice}: ${item.words}`)].filter(line => line !== '')
+}
+
 export type Gate = {
   askId: string
   question: string
@@ -36,6 +77,7 @@ export type Gate = {
   lean?: string
   draft?: Draft
   decision?: Decision
+  reason?: AskWhy
 }
 
 const textKey = (block: Block, key: string): string | undefined => {
@@ -84,6 +126,8 @@ function gateFrom(ask: Block, blocks: Block[]): Gate {
   const offered = ask.fence.choices
   const choices = Array.isArray(offered) ? offered.map(String) : []
   const gate: Gate = { askId, question: blockWords(ask.words), choices }
+  const reason = reasonOf(ask)
+  if (reason !== undefined) gate.reason = reason
   const lean = ask.fence.lean
   if (typeof lean === 'string' && choices.includes(lean)) gate.lean = lean
   const draft = blocks.filter(block => block.chi === 'walk' && block.che === 'seat' && block.cho === 'draft' && parentOf(block) === askId).at(-1)

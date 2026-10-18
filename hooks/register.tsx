@@ -114,6 +114,8 @@ import { PAGE_MOST, PAGE_NO_FOLDER, PAGE_OTHER, PAGE_TOO_BIG, pageEmpty, pageFai
 import type { PageRead } from './model/page'
 import { lastLineOf, parseSecretList } from './model/secrets'
 import type { SecretRow, SecretsCard } from './model/secrets'
+import { freshFeed, parseFeed, whereWords } from './model/roomfeed'
+import type { FeedEntry } from './model/roomfeed'
 import { discsOf, doorOf, programsOf, sizeOf } from './model/roomplace'
 import { DOOR_NOT_READ, DOOR_REFUSED, DOOR_UNKNOWN, ROOM_NOT_READ, ROOM_REFUSED, ROOM_TOO_OLD, ROOM_UNKNOWN, roomNameOf, roomStartOf, whereOf } from './model/roomstart'
 import { seatFace, waitKey, waitsOnHim } from './model/seat'
@@ -215,6 +217,8 @@ type Snapshot = {
   seatShelves: Record<string, SeatShelf>
   // The files of the shelf (order shelf-files), as `sandoq shelf list` says them: read only with the shelf window open, and the last reading stands after.
   shelfFiles: ShelfFilesRead
+  // The entries of the room's feed (feed/GATE.md of the run) with their answers, oldest first; none when the file was there and could not be read.
+  feed: FeedEntry[] | undefined
 }
 
 const emptySnap = (): Snapshot => ({
@@ -237,6 +241,7 @@ const emptySnap = (): Snapshot => ({
   shelfNames: [],
   seatShelves: {},
   shelfFiles: NO_FILES,
+  feed: [],
 })
 
 // The latest read of the folder, what every drawing shows.
@@ -316,6 +321,20 @@ let kitTheme: KitTheme = 'unknown'
 // read again only when it is new or its size changed.
 const walkCache: FileCache = new Map()
 const folderCaches = new Map<string, FileCache>()
+// The room's feed (order room-feed, part A): feed/GATE.md of the run, cached by size and time as a walk is, and parsed again only when its text moved. No side file:
+// the answers that toast are kept by their id in memory (`feedSeen`), as the desk's items are; the first read of the feed only seeds.
+const feedCache: FileCache = new Map()
+let feedDir = ''
+let feedParsed: { text: string; entries: FeedEntry[] } | undefined
+const feedSeen = new Set<string>()
+let feedSeeded = false
+const forgetFeed = (): void => {
+  feedCache.clear()
+  feedDir = ''
+  feedParsed = undefined
+  feedSeen.clear()
+  feedSeeded = false
+}
 // The room's own background, kept with the size and the change time of the file it was read from, and the room it was read in: the
 // file is read again ONLY when one of them moved (or the room did), never at a draw.
 let backgroundKept: KeptBackground | undefined
@@ -1509,6 +1528,24 @@ async function readFiles($, root: string, withSeats: boolean): Promise<ShelfFile
   return read
 }
 
+// The feed of the room: its file in the run's feed folder, named for the gate. No file is no entry; a file that is there and could not be read is none (the toasts
+// wait for the next read and the view keeps what it showed).
+async function readFeed(io: Io, dir: string): Promise<FeedEntry[] | undefined> {
+  if (dir !== feedDir) {
+    feedCache.clear()
+    feedParsed = undefined
+  }
+  feedDir = dir
+  const name = `${host.gate}.md`
+  const listed = (await listEntries(io, host, dir)).filter(entry => entry.name === name)
+  await readCached(io, host, dir, listed, feedCache, new Set([name]))
+  if (listed.length === 0) return []
+  const text = feedCache.get(name)?.text
+  if (text === undefined) return undefined
+  if (feedParsed?.text !== text) feedParsed = { text, entries: parseFeed(text) }
+  return feedParsed.entries
+}
+
 // Each part of the read is taken apart (takeApart): one that throws gives its empty value, is named in `said`, and the rest is read.
 async function readSnapshot($, isRoom: boolean, withDiscs: boolean, withSeats: boolean, said: Said[]): Promise<Snapshot> {
   const ROOT = host.root
@@ -1622,8 +1659,10 @@ async function readSnapshot($, isRoom: boolean, withDiscs: boolean, withSeats: b
   )
   // The files of the shelf (order shelf-files): the CLI lists them, read where the seats' shelves are read, the shelf window open, and at no other moment.
   const shelfFiles = await takeApart($, said, 'the files of the shelf', () => NO_FILES, () => readFiles($, ROOT, withSeats))
+  const feed = await takeApart($, said, 'the feed', () => undefined as FeedEntry[] | undefined, () => readFeed(io, `${ROOT}/feed`))
   return {
     exists: true,
+    feed,
     background,
     shelfNames,
     seatShelves,
@@ -1702,7 +1741,19 @@ function announce($, next: Snapshot) {
       bell.push(keeperRing(pick.name, gate === undefined || gate.question === '' ? card.text : gate.question, gate?.decision?.why ?? ''))
     }
   }
+  announceFeed(next.feed)
   isSeeded = true
+}
+
+// The answers of the room's feed (order room-feed, part A): each answer whose `to` holds desk/toasts rings once by its id, its WHO the entry's sayer and its line the
+// entry's text (bellLine fits it to TOAST_COLS), and a run of faults rings once. The first read of the feed only seeds: the answers already there ring nothing. A
+// read that gave no feed (the file was there and could not be read) changes nothing.
+function announceFeed(entries: FeedEntry[] | undefined): void {
+  if (entries === undefined) return
+  const fresh = freshFeed(entries, feedSeen)
+  if (feedSeeded) bell.push(...fresh.rings)
+  for (const id of fresh.ids) feedSeen.add(id)
+  feedSeeded = true
 }
 
 // One read, one toast: what the read put in `bell` (a new ask, a keeper pick, a new item of the desk for him) is said as one line, or folded
@@ -1719,7 +1770,7 @@ function ringBell($) {
 // (the time as it reads, the counts, the cents, a program's state and its HH:MM, the size as KB or MB) and never as the
 // bytes of the file: a living door rewrites logs/tick.md at each take and a program its file at its start and its end.
 function drawnOf(next: Snapshot, now: number): unknown {
-  const { tickText, discsText, programTexts, bytes, walks, background, ...rest } = next
+  const { tickText, discsText, programTexts, bytes, walks, background, feed, ...rest } = next
   const room =
     nav.view !== 'room'
       ? null
@@ -1728,6 +1779,8 @@ function drawnOf(next: Snapshot, now: number): unknown {
           discs: discsOf(discsText),
           programs: programsOf(Object.keys(programTexts).sort().map(name => programTexts[name]), zoneOf()),
           size: sizeOf(bytes),
+          // the feed card draws each entry's sayer, kind, first line and where it went; the room card its count
+          feed: (feed ?? []).map(entry => `${entry.id}:${whereWords(entry)}`),
         }
   if (room?.door.usdToday !== undefined) room.door.usdToday = Math.round(room.door.usdToday * 100) / 100
   return { ...rest, walks: walks.map(walk => `${walk.id}:${walk.text.length}`), background: backgroundKey(background), room }
@@ -1879,6 +1932,8 @@ async function readRoom($, token: { dead: boolean; before: number }) {
   // read began (order T2B), so a desk read that ended meanwhile left its news in `bell` and it is said once, here, with the asks.
   holding.delete(token)
   if (!deskPolling) ringBell($)
+  // A feed that was there and could not be read this time leaves the view with what it showed.
+  if (next.feed === undefined) next.feed = snap.feed
   snap = next
   isRead = true
   // The newest part that failed is said until a read goes through with none failing.
@@ -3580,6 +3635,7 @@ const paneOf = ($, e) => {
     discsText: snap.discsText,
     programTexts: snap.programTexts,
     bytes: snap.bytes,
+    feed: snap.feed ?? [],
     roomOpen,
     roomWhere: whereOf(host.session),
     ...(discChecksNow() === undefined ? {} : { discChecks: discChecksNow() }),
@@ -3723,6 +3779,7 @@ export const register: Register = on => {
     forgetTable()
     forgetSecrets()
     forgetDesk()
+    forgetFeed()
     if (reading !== undefined) reading.dead = true
     reading = undefined
     isBusy = false

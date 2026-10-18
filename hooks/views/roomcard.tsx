@@ -15,6 +15,8 @@ import { countOf } from '../model/blocks'
 import { DOOR_STANDS, LONG, discActsOf, runningWords } from '../model/discacts'
 import type { Busy } from '../model/discacts'
 import { pageAt } from '../model/pages'
+import { feedLabel } from '../model/roomfeed'
+import type { FeedLine } from '../model/roomfeed'
 import { readyWords } from '../model/roomplace'
 import type { Update } from '../model/roomplace'
 import { groupOf, isNotAFault, noteOf } from '../model/steps'
@@ -29,6 +31,7 @@ import type { VersionsTable } from './versions-table'
 export const ROOM_TITLE = 'The room'
 export const PLAYS_TITLE = 'What it plays'
 export const DOOR_TITLE = 'Door'
+export const FEED_TITLE = 'The feed'
 
 // One row of a card of the room: a press (with the arrow) where `press` is given, else a row of the same height with no edge, for a thing
 // that is not pressed.
@@ -161,6 +164,8 @@ export type RoomCardData = {
   records: number
   rules: number
   discs: number
+  // The entries of the room's feed (feed/GATE.md): the feed row says their count.
+  feed: number
   pane: string
   where: string
 }
@@ -187,7 +192,7 @@ export type RoomCardProps = {
   operator: boolean
   data: RoomCardData
   // The card of the room that stands open beside the list (from 128 columns): its row keeps the open look while its card is open.
-  openCard?: 'door' | 'plays'
+  openCard?: 'door' | 'plays' | 'feed'
   canvasRows?: number
   page?: number
   actions: {
@@ -195,10 +200,14 @@ export type RoomCardProps = {
     openSeats: () => void | Promise<void>
     openShelf: () => void | Promise<void>
     openPlays: () => void | Promise<void>
+    openFeed: () => void | Promise<void>
     openVersions: () => void | Promise<void>
     page?: (list: string, page: number) => void
   }
 }
+
+// The count of the feed row: `none yet`, `1 entry`, `3 entries`.
+export const feedWords = (count: number): string => (count === 0 ? 'none yet' : `${count} ${count === 1 ? 'entry' : 'entries'}`)
 
 // The room card, the rows in a fixed order. A room with no disc says `none yet` for What it plays.
 export function roomCardView({ ui, plan, columns, operator, data, openCard, canvasRows, page, actions }: RoomCardProps) {
@@ -209,6 +218,7 @@ export function roomCardView({ ui, plan, columns, operator, data, openCard, canv
     ...(operator
       ? [
           { id: 'plays', label: PLAYS_TITLE, value: data.discs === 0 ? 'none yet' : plural(data.discs, 'disc'), press: actions.openPlays, open: openCard === 'plays' },
+          { id: 'feed', label: FEED_TITLE, value: feedWords(data.feed), press: actions.openFeed, open: openCard === 'feed' },
           { id: 'versions', label: 'Versions', value: `pane ${data.pane}`, press: actions.openVersions },
           ...(data.where === '' ? [] : [{ id: 'folder', label: 'Folder', value: data.where }]),
         ]
@@ -369,4 +379,50 @@ export function doorView({ ui, plan, columns, doorUp, downSince, lastTick, today
     ...(!doorUp && actions.putUp !== undefined ? [{ id: 'put-up', label: 'Put it up', value: '', press: actions.putUp, arrow: false }] : []),
   ]
   return roomRowsView({ ui, plan, columns, list: 'door', rows, ...(canvasRows === undefined ? {} : { canvasRows }), ...(page === undefined ? {} : { page }), actions })
+}
+
+export type FeedCardProps = {
+  ui: Ui
+  plan: Plan
+  columns: number
+  // The entries of the feed, newest first (model/roomfeed.ts feedLines).
+  lines: FeedLine[]
+  canvasRows?: number
+  page?: number
+  actions: { page?: (list: string, page: number) => void }
+}
+
+// The most entries the feed card lays out, the newest; the line over them says so where the feed holds more.
+export const FEED_SHOWN = 200
+
+// The feed card (order room-feed, part A): the entries of feed/GATE.md newest first, each a row of the same height: who said it and what kind it is (and the number of a
+// row) at the left, where the door sent it at the right (cards, toasts, none, the fault, or no answer yet), and the first line of its text under, cut to the cells of the
+// row. It is no press. The list pages by the one rule and never scrolls.
+export function roomFeedView({ ui, plan, columns, lines, canvasRows, page, actions }: FeedCardProps) {
+  const { Text } = ui
+  const width = listRowWidth(plan.width)
+  const inner = Math.max(1, width - PRESS.across)
+  const shown = lines.slice(0, FEED_SHOWN)
+  const said = lines.length === 0 ? 'Nothing is on the feed yet.' : lines.length > shown.length ? `The newest ${shown.length} of ${lines.length} entries.` : ''
+  const parts =
+    said === ''
+      ? []
+      : [
+          {
+            node: (
+              <Text key="feed-line" color={THEME.dim} wrap="wrap">
+                {said}
+              </Text>
+            ),
+            rows: rowsOfWords(said, width),
+          },
+        ]
+  const rows: RoomRow[] = shown.map(line => ({
+    id: line.id,
+    label: feedLabel(line),
+    value: line.where,
+    ...(line.first === '' ? {} : { note: fitted(line.first, inner) }),
+    ...(line.where.startsWith('fault') ? { tone: { color: THEME.fault } } : {}),
+  }))
+  return roomRowsView({ ui, plan, columns, list: 'feed', rows, parts, ...(canvasRows === undefined ? {} : { canvasRows }), ...(page === undefined ? {} : { page }), actions })
 }

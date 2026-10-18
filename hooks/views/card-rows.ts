@@ -4,7 +4,7 @@
 // the app draws its words from the same helpers (wrapCells, bodyOf), so the rows said here are the rows drawn there.
 // It counts the card AT REST, the one that stands in the column: an open card takes the column's place whole, under a link Back.
 import { stripUlid } from '../model/blocks'
-import { answeredBy, gatesOf, ruleWords } from '../model/gate'
+import { answeredBy, gatesOf, reasonText, ruleWords } from '../model/gate'
 import type { Gate } from '../model/gate'
 import { panelChip } from '../model/tree'
 import { isListening, sayLine } from '../model/walk'
@@ -120,6 +120,9 @@ function picksLines(labels: string[], cells: number): number {
 // Input. The parts of the gate are one `line` apart.
 function waitingLines(gate: Gate, cells: number): number {
   const parts = [wrapCells(`Waits for you · ${gate.question}`, cells).length]
+  // the lines of why the keeper asked a name stand in one block under the ask, no row between them
+  const why = gate.reason === undefined ? 0 : reasonText(gate.reason).reduce((sum, line) => sum + wrapCells(line, cells).length, 0)
+  if (why > 0) parts.push(why)
   const picks = picksLines(picksOf(gate).map(({ choice }) => stripUlid(choice)), cells)
   if (gate.draft === undefined) parts.push(...(picks > 0 ? [picks] : []), 1)
   else parts.push(wrapCells(`${gate.draft.by} ${DRAFTED}`, cells).length, 1, ...(picks > 0 ? [picks] : []))

@@ -1,4 +1,6 @@
 import { stripUlid } from '../model/blocks'
+import { reasonText } from '../model/gate'
+import type { AskWhy } from '../model/gate'
 import { THIS_SEAT } from '../model/seat'
 import { OPEN_HERE, SEAT_SHUT_KEY, SHUT_BUTTON, wakesLine } from '../model/sessionseat'
 import { namesOf, sizeOf, wrapRows } from './cells'
@@ -27,6 +29,8 @@ export type SeatWait = {
   // The pick the room leans to: the one primary act of a gate.
   lean: string
   draft?: { words: string; by: string }
+  // Why the keeper asked a name: its from, quote and the means of each choice, from the ask's fence. None draws no line of it.
+  reason?: AskWhy
 }
 
 // A wait he answered in the last few minutes, folded to one line: "● ACT: TITLE", or "● ACT: DETAIL" where the decision has a second
@@ -341,6 +345,9 @@ export function seatView({ ui, surface, seat, isHere, waits, others, answered, f
         asks,
         whole && body,
       ]
+  // Why the keeper asked a name (order room-feed, part A): who said the words, the line that holds the name, and what each choice does, each a line in the dim
+  // color from the ask's fence (model/gate.ts reasonText); none where the fence holds no quote.
+  const reasons = wait.reason === undefined ? [] : reasonText(wait.reason)
   const ask = [
     <Box key={`seat-ask-${at}`} flexDirection="row" flexWrap="wrap" columnGap={SPACE.near}>
       <Text bold {...ink}>
@@ -348,6 +355,17 @@ export function seatView({ ui, surface, seat, isHere, waits, others, answered, f
       </Text>
       {wait.why !== '' && <Text color={warn}>{`· ${wait.why}`}</Text>}
     </Box>,
+    ...(reasons.length === 0
+      ? []
+      : [
+          <Box key={`seat-reason-${at}`} flexDirection="column">
+            {reasons.map((line, i) => (
+              <Text key={`seat-reason-${at}-${i}`} color={dim} {...wrap}>
+                {line}
+              </Text>
+            ))}
+          </Box>,
+        ]),
     wait.kind === 'form' ? form : gate,
   ]
 

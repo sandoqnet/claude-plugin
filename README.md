@@ -1,4 +1,4 @@
-# room-pane 0.8.62
+# room-pane 0.8.63
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -22,26 +22,37 @@ A room can be in any folder. `sandoq room new` marks a folder (`.sandoq/room.md`
 `.sandoq` itself), and a session in that folder or below it, at any depth, finds the room by its
 mark: the nearest above the session wins, and in a folder the mark comes before `room.sh`. For a
 marked room the tool `room_say` and the command `/room-say` say as the session, through `sandoq
-room say` run in the session's folder, which is how sandoq names the seat. Your words are one call
-of the verb `sandoq room card`: the submit hook runs it in the session's folder with the flag
-`--session` and the id, and the bar's "To the room" runs it with the flag `--no-seat`, the text on
-the input in both. The verb rings the door itself, so no feed runs after it and the hook names no
-seat. A tap goes through `sandoq room tap`, the room's other programs run by `sandoq room run` with
-the bare name, and the door starts with `sandoq room start`. The pane runs `sandoq room new` only
-when you press Make a room here (see below). It finds `sandoq` on the PATH, under the sandoq home,
-or by the plugin option `sandoq`. LOAD.md has the steps. A room found by `room.sh` works as before.
+room say` run in the session's folder, which is how sandoq names the seat. Your words land on the
+room's feed: the submit hook runs the room's program `feedin` (`sandoq room run feedin` for a
+marked room, `python3 feedin.py` for a room found by `room.sh`) in the room's work folder with the
+flags `--kind his`, `--folder` and `--session`, the prompt on the input. The bar's "To the room"
+still runs the verb `sandoq room card` with the flag `--no-seat`. A tap goes through `sandoq room
+tap`, the room's other programs run by `sandoq room run` with the bare name, and the door starts
+with `sandoq room start`. The pane runs `sandoq room new` only when you press Make a room here (see
+below). It finds `sandoq` on the PATH, under the sandoq home, or by the plugin option `sandoq`.
+LOAD.md has the steps. A room found by `room.sh` works as before.
 
-The verb prints the card's id with no dot and exits 0. With no door it says one line on the error
-out, `no door answers in this room`, makes no card and exits 1: the hook then gives the session one
-line, "The room's door is down, this message made no card.", and the bar shows the room's line and
-"Nothing was sent". If the ring fails after the card, the id is on the out and the exit is 1: the
-card stands and the hook waits for its reading as ever. Any other refusal makes no card (an older
-sandoq has no such verb, or the verb's usage failed): the hook gives the session one line, "The
-room did not take this message." and then the last line of the error out, with no path of this
-machine in it, so your words never vanish unseen. The least sandoq that has the verb is 0.3.0. No
-older call is tried when the verb fails.
+`feedin` prints the card's word, a dot and the id, when the room's door made a card of the entry:
+the hook then waits for the card's reading as ever. With no word and exit 0 the door made no card
+of it, and the session gets no context. When `feedin` itself faulted (no door, or no key; exit 1
+and an error line that begins `feedin:`) the entry waits on the feed: the hook gives the session
+one line, "This message waits on the room's feed:" and then that line, with no path of this machine
+in it. Any other refusal (a usage fault, a room whose disc has no `feedin`, a run that did not
+start) gives one line, "The room did not take this message." and the last line of the error out,
+so your words never vanish unseen. No other call is tried when `feedin` fails. A call of `feedin`
+for your words or a row is given 35 seconds, over the 30 of its own call to the door's model, so a
+slow answer is not cut off and its card is not lost; the submit hook is given 50.
 
-At each message, before the card is made, the submit hook also writes the session's id into
+A prompt that opens "Room ROOM, N rows for SEAT." is a wake's turn, the room's rows and not your
+words. The submit hook starts one detached child, `node hook.ts rows`, with the turn on its input,
+and returns at once with no context. The child feeds each row line (its number, two spaces, its
+line) alone, in order, with `--kind row`, `--sayer` the word before the line's first colon (`none`
+when it is not letters, digits, dashes and underscores alone) and `--seq` the number. The child has
+no hook time limit, so every row lands.
+The head and the answer line are never fed. An open seat does not make the bridge quiet: its rows
+go on the feed. The Stop hook runs `answer.py` alone, as ever; it writes the answer entry itself.
+
+At each message, before the entry is fed, the submit hook also writes the session's id into
 `room-pane-sessions.json` at the top of the run folder, beside pane.json. The file holds one
 object, `{"folders": {FOLDER: [ID, ...]}}`. FOLDER is the session's folder as an absolute path with
 no last slash: one function, `folderKey` of bridge.ts, makes the key for the hook and for the pane
@@ -54,18 +65,17 @@ id, two sessions open in one folder are one seat, and a session that changes fol
 the new folder.
 
 The memory hook runs `node hook.ts memory` after a Write, an Edit or a MultiEdit (a
-PostToolUse hook, 10 seconds). When the file is in Claude's memory folder it runs one call in the
-session's folder: `sandoq room say --session ID memory: FILE`, one argv list with no shell. The
-folder is the
+PostToolUse hook, 10 seconds). When the file is in Claude's memory folder it feeds one entry, as
+`feedin` with `--kind memory` and the text `memory: FILE` on the input, one argv list with no
+shell. The folder is the
 importer's rule (`found_in` of the claude disc's import.py): the home's
 `.claude/projects/PROJECT/memory/FILE`, the file directly in it, FILE of letters, digits and . _ -
 that ends in .md, never MEMORY.md and never a name that opens with a dash (sandoq would read it as
 a flag). The hook reads the shape of the path only: it never opens, stats
 or reads the file, and it sends the file's name alone, never its text. It finds the room as the
-submit hook does, by the mark and `sandoq`; with no room, no `sandoq`, a room with no mark or the
-bridge off, it sends nothing. The exit is 0 and nothing is printed, whatever goes wrong. A file of
-another project than the room's is said all the same: the room's gate says one line and files
-nothing.
+submit hook does; with no room, a marked room with no `sandoq` or the bridge off, it sends
+nothing. The exit is 0 and nothing is printed, whatever goes wrong. A file of another project than
+the room's is said all the same: the room's gate says one line and files nothing.
 
 To say something to one seat, type the command, an at sign with the seat's name, then the text:
 `/sandoq @rostam please read the survey`. The pane does not open. It runs `sandoq room say` in the
@@ -307,7 +317,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.62 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.63 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -977,6 +987,34 @@ room"). From 128 columns the room card stays at the left with the pressed row op
 Operator holds one row, "Plays" with the room's count of discs, that opens the same list with Back
 to that seat; the Runs card and its hashes are gone. Versions holds one link, "What it plays ›".
 The terminal keeps its column (Who sits, What it plays, The door).
+
+## The feed of the room
+
+The room keeps a feed: `feed/GATE.md` of the run folder (GATE is the gate of the room), append
+only. Each entry (`SAYER / { feed::KIND::entry }`, KIND his, row, answer or memory) is written
+before the door asks where it goes; its answer (`@ID / { feed::door::answer }`) comes later and
+holds `to` (desk/cards, desk/toasts or none), the card's word, the rule, or the fault. The pane
+reads the file at each poll, by size and time, and writes nothing beside it. The parse stands in
+`hooks/model/roomfeed.ts`.
+
+In Operator the room card has one row more, "The feed", with the count of the entries. It opens
+the feed card: the entries newest first, a row each, with who said it and its kind (`mara · row
+41`), where the door sent it (cards, toasts, none, the fault, or no answer yet) and the first line
+of its text under it, cut to the row. It is no press, and it never scrolls: it pages by the one
+rule of the press box.
+
+An answer whose `to` holds desk/toasts is one toast, once by its id: WHO is the entry's sayer and
+the line is its text, cut to 72 columns. Two or more in one read fold to one toast, as the desk's
+items do. A run of faults is one toast, "the feed door failed: WHY". The first read of the feed
+only seeds: the answers already there at the pane's start ring nothing. Nothing is kept in a file.
+
+A name ask of the keeper says why. Its fence holds `from` (who said the words that hold the name:
+a seat, or `you`), `seq` (the number of its row, only when the card has one), `quote` (the line
+that holds the name, 120 characters at most) and `means` (one line for each of its `choices`, in
+the same order). The letter shows "From mara, row 41", the quote, and each choice with its line
+under "Waits for you". With no `means`, or a list not as long as `choices`, the choices stand
+alone, and the pane has no words of its own for them. An ask with a `quote` is no question of the
+seat in `from`: that seat is who said the words, not who asks.
 
 ## The look
 

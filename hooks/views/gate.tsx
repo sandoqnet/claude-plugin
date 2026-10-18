@@ -1,5 +1,5 @@
 import { stripUlid } from '../model/blocks'
-import { answeredBy, ruleWords } from '../model/gate'
+import { answeredBy, reasonText, ruleWords } from '../model/gate'
 import type { Gate } from '../model/gate'
 import { isApp } from './glass'
 import { LOOK } from './look'
@@ -85,6 +85,8 @@ export function gateView({ ui, surface, cardId, gate, actions, rulesText, takenO
 
   if (decision === undefined) {
     const draft = gate.draft
+    // Why the keeper asked a name (order room-feed, part A): who said the words, the line that holds the name, and what each choice does, dim, from the ask's fence.
+    const reasons = gate.reason === undefined ? [] : reasonText(gate.reason)
     const pickView = (choice: string, i: number) => {
       const words = stripUlid(choice)
       const lean = draft === undefined && choice === gate.lean
@@ -120,6 +122,15 @@ export function gateView({ ui, surface, cardId, gate, actions, rulesText, takenO
           )}
           <Text color={app ? THEME.warn : LOOK.warn}>{bare ? gate.question : `· ${gate.question}`}</Text>
         </Box>
+        {reasons.length > 0 && (
+          <Box key={`gate-reason-${at}`} flexDirection="column">
+            {reasons.map((line, i) => (
+              <Text key={`gate-reason-${at}-${i}`} color={dim} {...(app ? { wrap: 'wrap' } : {})}>
+                {line}
+              </Text>
+            ))}
+          </Box>
+        )}
         {draft === undefined && (
           <Box key={`gate-picks-${at}`} {...(app ? picksProps : { flexDirection: 'row', flexWrap: 'wrap', columnGap: 2 })}>
             {picks.map(({ choice, i }) => pickView(choice, i))}

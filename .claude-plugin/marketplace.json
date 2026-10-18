@@ -1,0 +1,12 @@
+{
+  "name": "sandoq",
+  "owner": { "name": "sandoq" },
+  "description": "A marketplace on GitHub that holds the room pane, a Claude Code plugin for a sandoq room",
+  "plugins": [
+    {
+      "name": "sandoq",
+      "source": ".",
+      "description": "A live pane, band and toasts for the room's run folder"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "sandoq",
+  "version": "0.8.59",
+  "description": "A live pane, band and toasts for the room's run folder: cards, walks, taps, the seat's answers and the shelf; the bridge hooks make each message a card",
+  "author": { "name": "sandoq" },
+  "userConfig": {
+    "bridge": {
+      "type": "string",
+      "title": "Bridge",
+      "description": "on makes each message a card and gives the session the room's reading; off (or no, false, 0) turns the hooks off",
+      "default": "on"
+    },
+    "gate": {
+      "type": "string",
+      "title": "Gate",
+      "description": "The room's instance a bridged card lands on, the one the pane shows; empty reads it from room.sh",
+      "default": ""
+    },
+    "sandoq": {
+      "type": "string",
+      "title": "Sandoq",
+      "description": "The path of the sandoq program, which runs the words of a room found by its mark; empty looks for it on the PATH, then under the sandoq home",
+      "default": ""
+    }
+  }
+}

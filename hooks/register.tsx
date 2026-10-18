@@ -160,6 +160,7 @@ import type { Door, Step } from './model/steps'
 import { DEFAULT_FACE, FACES, INDENT, openAsks, parseWalk, waitingLine } from './model/walk'
 import { DOOR_LATE, NO_CARD_LINE, candidatesOf, cardAtPlace, idOfSay, keepSaid, lineOf, newestIdOf, sessionIdsOf, withoutSlashWords, writeLineOf, yourCardsOf } from './model/yourcards'
 import { failureLine, guardedPane, plainBlock } from './views/guard'
+import { deskCountOf, waitsOnYouWords } from './views/pane'
 import { countWords, failureWords, linesOf, pairWords, pairsOf, scrub } from './views/inspect'
 import { LOOK } from './views/look'
 import { fitted } from './views/theme'
@@ -167,7 +168,7 @@ import { forgetScene } from './views/scene'
 import { isApp } from './views/glass'
 import { DOCK_PLACES, dockOf } from './model/dock'
 import type { DockSlot } from './model/dock'
-import { DOOR_READING, canvasRowsOf, dockPlaceOf, dockPress, forgetTiles } from './views/frame'
+import { DOOR_READING, canvasRowsOf, dockPlaceOf, dockPress, forgetTiles, terminalRowsOf, terminalSize } from './views/frame'
 import { pressedRegion } from './views/press'
 import { forgetPictures } from './views/ur'
 import { DESK_LIST, forgetDeskPicture } from './views/desk'
@@ -2845,11 +2846,13 @@ function bandText(): string {
   // A card the session bridged (its root names a session) is the session's own say: the band shows the
   // newest card of the room.
   const newest = snap.cards.find(card => card.walk.session === '')
-  const records = `${snap.records.length} records`
-  if (!newest) return `room · ${records}`
+  // What waits on HIM, counted as Desk N counts it (views/pane.tsx deskCountOf). The band said the shelf's records here, `room · 0 records`, which
+  // is a count of the catalog and no part of the desk: it read 0 over a desk of 3 (the lab's real capture of 0.8.65, order mend terminal real).
+  const waits = waitsOnYouWords(deskCountOf({ walks: snap.walks, seatsText: snap.seatsText, seat: seatNow(), now: pollNow, zone: zoneOf(), entries: snap.entries, deskCard: deskCardNow(), keeperOk: [...keeperOk] }))
+  if (!newest) return `room · ${waits}`
   const label = labelOf(newest)
   const status = statusOf(newest, newest.walk.answered)
-  return `room · ${records} · "${preview(newest.text)}" ${label === '' ? '' : label + ' '}→ ${status}`
+  return `room · ${waits} · "${preview(newest.text)}" ${label === '' ? '' : label + ' '}→ ${status}`
 }
 
 // What the status line under the bar says of the door, as the band does; '' for a room of the world.
@@ -3572,14 +3575,17 @@ function doPaneRead(): string {
 const paneOf = ($, e) => {
   const openId = nav.view === 'yours' ? openedId() : openCardId(snap.cards, nav.view === 'feed' ? nav.cardId : '')
   const seat = seatNow()
-  // The pane opens on his desk in the app. The terminal has no dock: it keeps its column on this seat's face, as it opened before the desk, and takes
-  // the desk only where it was asked for (a press or the do tool opened it).
-  const navShown: Nav = !isApp(e.surface) && nav.view === 'desk' && !deskAsked ? { view: 'seat', name: '' } : nav
   // The pane is laid out at the width a seat asked for, at the left of the real one, and never wider than it.
   const real: number | undefined = e.props.bodyColumns
   const columns = laidAt > 0 && real !== undefined ? Math.min(laidAt, real) : real
   kitTheme = kitThemeOf(e)
-  const high = paneRows(e.viewport?.rows, (e.props.scroll as { bodyRows?: unknown } | undefined)?.bodyRows)
+  const bodyRows = (e.props.scroll as { bodyRows?: unknown } | undefined)?.bodyRows
+  const high = paneRows(e.viewport?.rows, bodyRows)
+  // The terminal's body is as high as the host says, with no floor: the small layout is a short body (views/frame.tsx).
+  const terminalRows = terminalRowsOf(e.viewport?.rows, bodyRows)
+  // The pane opens on his desk in the app and in the wide terminal. The small terminal has no room for a place: it opens on the bar and its keys,
+  // this seat's face as it opened before the desk, and takes the desk only where it was asked for (a press or the do tool opened it).
+  const navShown: Nav = !isApp(e.surface) && nav.view === 'desk' && !deskAsked && terminalSize(columns ?? 80, terminalRows) === 'small' ? { view: 'seat', name: '' } : nav
   const tree = guardedPane({
     ui: $.ui.resolve(e),
     face,
@@ -3660,8 +3666,9 @@ const paneOf = ($, e) => {
     countDraws: true,
     drawnAt: clockNow(),
     bodyColumns: columns,
-    // The height of the place is the body's own (props scroll bodyRows), not the whole surface's rows (see paneRows).
-    rows: high,
+    // The height of the place is the body's own (props scroll bodyRows), not the whole surface's rows (see paneRows). The terminal's is the body's
+    // rows with no floor (terminalRowsOf).
+    rows: isApp(e.surface) ? high : terminalRows,
     roomName: roomName(),
     background: snap.background,
   })

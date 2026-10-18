@@ -1,4 +1,4 @@
-# room-pane 0.8.64
+# room-pane 0.8.66
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -281,9 +281,10 @@ each minute for the ages; a file the door rewrites that changes no word draws no
   window stands beside), the body's rows, and the open place of the dock, or "none, at rest".
 - **What the app no longer says**: the count of cards and the cost ("14 cards · $0.04") stood in
   the status line under Operator and Trace. The app has no status line now, so it says neither
-  anywhere; the terminal's status line keeps them, and says "● door up · 14 cards · $0.04 on these
-  cards": the dollars are the cost of the cards shown, not the door's day, which the Room place
-  says as "Today". A cost in the tray of the bar is a later cut.
+  anywhere; the terminal's status line keeps them, and under Trace says "● door up · 14 cards ·
+  $0.04 on these cards" (under Operator "● door up", then "14 cards · 0 faults · $0.0412"): the
+  dollars are the cost of the cards shown, not the door's day, which the Room place says as
+  "Today". A cost in the tray of the bar is a later cut.
 
 The colors of the scene, the bar and the tables of the lenses are hex (`hooks/views/glass.ts`,
 `hooks/model/tones.ts`), since the scene is hex and the pane cannot read your theme; the cards that
@@ -317,7 +318,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.64 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.66 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -465,8 +466,9 @@ only: nothing is written to the room, and the pane forgets it when you leave the
 
 ## Your desk
 
-The pane opens on a desk of what waits on you, in the app (the terminal keeps this seat's face and
-reaches the desk by the do tool, `place desk`). Two sources, no copy: the open asks of the room
+The pane opens on a desk of what waits on you, in the app and in the wide terminal (the small
+terminal opens on its bar and its keys, and reaches the desk by the key `d` or by the do tool,
+`place desk`). Two sources, no copy: the open asks of the room
 (the letters, as `hooks/model/seat.ts` gives them, never copied) and the items `sandoq room desk
 list --json --all` prints, read when the desk opens, after a Done and by the poll, shown or at
 rest, never on a timer of its own and never at a draw. The poll does not wait for it. The items
@@ -717,7 +719,7 @@ sent to the door.
   hide more, and "Show N older" counts those apart from the ones the setting hides. The terminal's
   feed draws the same line and Button.
 - **On open**: "The desk" (the default; a file written before the desk says `seat`) opens the pane
-  on your desk, where the terminal keeps this seat's face; "The room" on the
+  on your desk, in the small terminal too where a key has not been pressed; "The room" on the
   level up.
 - **Date** and **Clock**: the file keeps them, but the plate over the scene is gone from the app's
   place: the bar says the date and the time always.
@@ -895,8 +897,8 @@ When the open card has an ask that waits, the pane draws the turn: one row for e
 line and how many cards name it), then "new" and "none". A press answers the ask. If the keeper was
 asked, one dim line says so and the buttons stay.
 
-The composer (in the terminal at the bottom; the app has none) has one line that says whom your
-words go to:
+The composer (in the terminal at the top, over the place; the app has none) has one line that says
+whom your words go to:
 
 - **A card with an ask**: the words answer that ask. Type `new`, `none` or the name of exactly one
   candidate. Other words send nothing; a toast says the choices.
@@ -913,13 +915,12 @@ shows in a toast and nothing is sent.
 
 ## The profile and the shelf
 
-The place "Shelf" of the dock (in the terminal the "shelf" button) opens the shelf as a place: the
-asks that wait for you, your rules, what was answered today, and the first items of the shelf ("N
-more ›" lists the rest). A row of an item
-opens the profile of one record. A profile has four parts: about (the roles the record has had,
-each with the card it came from and its age), connections (other records; a press opens one),
-moments, and references (the cards that name it; a press opens one). Records of one name are told
-apart by a line. "‹ room" goes back to the feed.
+The place "Shelf" of the dock (in the terminal the "Shelf" tab, or the key `s`) opens the shelf as a
+place: the asks that wait for you, your rules, what was answered today, and the first items of the
+shelf ("N more ›" lists the rest). A row of an item opens the profile of one record. A profile has
+four parts: about (the roles the record has had, each with the card it came from and its age),
+connections (other records; a press opens one), moments, and references (the cards that name it; a
+press opens one). Records of one name are told apart by a line. "‹ room" goes back to the feed.
 
 The gate's acts run the room's own scripts in a local room, and the pane writes no room file. Your
 send of a seat's draft as it was is `tap.sh` with `--draft` and the draft's id; the words you
@@ -960,8 +961,9 @@ seat's shelf goes back to it. Nothing scrolls.
 
 ## The Room place
 
-Under Operator the Lens card of Settings has a Button "Room" (in the terminal the head has "Room"
-beside "Shelf N"); Public has no way in. It opens the Room place, with "‹ Back" on top, and in it
+Under Operator the Lens card of Settings has a Button "Room" (in the terminal the tab row has
+"Door" beside "Shelf", in every lens, and the key `o`); Public has no way in in the app. It opens
+the Room place, with "‹ Back" on top, and in it
 stand who sits, what it plays (with the update that waits, "Update" and "Not now"), the door, the
 programs running and what the room has grown. In the terminal there is no composer here.
 `discs.md`, `logs/tick.md`, `cache/programs/*.md` and the listing of the shelf are read while the
@@ -973,7 +975,8 @@ size). "Who may do what ›" and "N more seats ›" open in memory and close whe
 place. "Update" and "Not now" are the tap of the card. "What changes ›" opens the page of the
 update by the system's opener (`xdg-open`, `open`), for a web page alone; any other page is said
 in a toast. "Put it up" starts the door as the pane does at its start, and a room with no door
-program says so. In the terminal the same place is a column, opened by "room" in the head.
+program says so. In the terminal the same place is a column, opened by the tab "Door" or the key
+`o`.
 
 In the app the place is the room card: a press box a row, Door, Seats and Shelf in each lens, and
 in Operator What it plays, Versions and Folder too (Folder says the last two parts of the folder
@@ -1048,16 +1051,49 @@ door runs, and nothing else.
 - The lens switch (news, walk, trace) is the egress box's, at its foot, drawn by the slot on the
   open card; the card draws none of its own. A card at an ask, or with no route yet, shows its
   state line alone and so has no switch.
-- The header: a dot, the path "ROOM › SEAT", at the right the count of cards and their cost
-  (off the Public lens); a dashed rule; "Back to SEAT", "Settings", the shelf (under Operator) and
-  the lenses as Buttons on one line, the shown lens the primary Button; a second rule.
+- The pane in the terminal has two layouts, and one function (`terminalSize` of
+  `hooks/views/frame.tsx`) says which: SMALL where the body has fewer than 16 rows, or fewer than
+  40 columns, else WIDE. Rows decide first: his pane is a dock at the side of Claude Code, 54
+  columns by about 38 rows, and that is WIDE. SMALL is the capture bar and ONE key line under it:
+  `d` desk, `o` door, `s` shelf, each a plain Button whose hotkey is that letter. A key opens that
+  place under the bar, and while a place is open a fourth Button, `b` back, ends the key line and
+  returns to the bar and the key line alone; the letters you type in the bar stay letters. The
+  small desk draws its items and the pager alone (no piles row, no head, no Answered line), so one
+  item and the pager stand in a pane of 10 rows, and the small Shelf draws no section heads. WIDE
+  is, from the top, the capture bar; one tab row, the same on every place: "Desk N" (N what waits
+  on you), "Shelf" and "Door", the open one the primary Button and the others dim, then, dim,
+  Settings and the lens tabs; the place; one status line. It opens on the desk. The tab row is ONE
+  row at every width from 40 columns: Desk, Shelf and Door always, then as many of Settings and
+  the lens tabs as stand whole. What the row leaves out is reached from a place: Settings from a
+  Button at the end of the Door, a lens from the Lens line at the top of Settings (the small
+  terminal has no tab row, so it has both always). "Back to SEAT" stands first in the tab row only
+  where a place deeper than a tab is open (`Back`, or `‹` alone, in a row that cannot hold them).
+- A Button is counted as the host draws it in the terminal: "[ label ]", the label and four cells
+  (`BUTTON_CELLS` of `hooks/views/cells.ts`), and a plain one with a key as "d: desk". The fit of
+  every row, pile, foot, tab row, key line and pager counts so, and the pane marks the kit it
+  draws the terminal with (`asTerminal`), so the app's Buttons keep their own count. No line wraps:
+  a row of the desk is its title cut to the frame, with its Done and its age at the right, and
+  one dim line under it. The terminal pages to the rows the host tells (no floor of 24): a body
+  longer than its rows is paged ("N more ›", "‹ Earlier"), and EVERY place pages: a place that
+  does not fit whole is cut into its parts and paged under one row of links
+  (`hooks/views/termpage.tsx`). The line "This place needs N rows" stays only where not even one
+  part stands with the links. Nothing scrolls.
+- The bar of the terminal has the same rows empty and typed in (`BAR_HEIGHT`), so the rows under it
+  never move as you type. A body too short for the bar and the key line (under 6 rows) draws the
+  key line alone, one row, so a key still opens a place when the dock is opened bigger. The keys
+  are the pane's while it holds the focus: where the prompt holds it, `d` goes to the prompt. That
+  is the host's and no fault of the pane.
 - The piece table of the egress tab is two columns: the role, in a column as wide as the longest
   role and no more than 14, then the rest. What runs stands quiet at the foot, in a frame.
-- The status line of the terminal, under the bar, says the door as the band does, then what waits
-  on this seat; under Operator and Trace the count of cards and the cost. The app has none: its
-  bar says the door and its dock says what waits.
+- The status line of the wide terminal, at the foot, is a dot lit while a door runs, the path "ROOM
+  › SEAT", then the door as the band does, then what waits on you, counted as "Desk N" counts it
+  (the letters, the keeper's picks and your open items); under Operator and Trace
+  the count of cards and the cost (the faults too under Operator). The app has none: its bar says
+  the door and its dock says what waits.
 - The band above the prompt skips a card the session bridged (its root names a session) and shows
-  the newest card of the room.
+  the newest card of the room. It says first what waits on you, counted as "Desk N" counts it
+  ("nothing waits on you", "N waits on you"); it said the records of the shelf, which are no part
+  of the desk (`room · 0 records` over a desk of three).
 
 Left out: the fonts of the mockups (a terminal draws the one monospace font you chose; the plugin
 cannot set it), the round avatar of a person (the kit draws no circle and a terminal cell is

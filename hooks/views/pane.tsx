@@ -27,14 +27,17 @@ import { rulesToday, shelfOf } from '../model/shelfplace'
 import { FACES, openAsks } from '../model/walk'
 import { OPEN_PAGE } from '../model/pages'
 import { writeLineOf, yourCardsOf } from '../model/yourcards'
-import { captureView } from './capture'
-import { cardView, ruleView } from './card'
+import { BAR_HEIGHT, captureView, keyLineView } from './capture'
+import type { KeyPlace } from './capture'
+import { cardView } from './card'
 import { DESK_LIST, deskItemView, deskView, itemTitleOf } from './desk'
 import { isApp } from './glass'
 import { hotkeyProps, hotkeysOn } from './keys'
-import { kidsOf, namesOf, sizeOf } from './cells'
-import { fitBody, pagedBody, withKids } from './paged'
-import { answeredView, barView, CANVAS_TOP, canvasRowsOf, dockPlaceOf, dockPress, dockView, EDGE } from './frame'
+import { asTerminal, buttonCells, kidsOf, namesOf, sizeOf } from './cells'
+import { FIT_LEAST, fitBody, pagedBody, withKids } from './paged'
+import { terminalPaged } from './termpage'
+import { answeredView, barView, CANVAS_TOP, canvasRowsOf, dockPlaceOf, dockPress, dockView, EDGE, terminalSize } from './frame'
+import type { TerminalSize } from './frame'
 import { lensView } from './lens'
 import { LOOK } from './look'
 import { bannerView, olderWords, operatorLensView, operatorView } from './operator'
@@ -103,7 +106,21 @@ const CLOSE_CARD = 'close-card'
 // questions leaves out of the Operator feed, counted once, where the pane filters them (paneView); 0 when none is left out.
 // `starterFirst`: the door line and its Button are the first block of the Letters body (order MR, R4), not a band over the canvas.
 // `opened`: from 128 columns the list at the left is drawn on its own nav; this is the nav of the row open at the right, so the list can keep that row's open look.
-type RoomState = PlaceProps & { lens: Lens; app: boolean; layer: number; plan: Plan; columns: number; drawn?: Drawn; hidden?: number; starterFirst?: boolean; opened?: Nav }
+// `size` and `termRoom` are the terminal's alone: its layout (views/frame.tsx terminalSize) and the rows its body has left under the bar, the keys or
+// the tabs and the status line, which a place that pages takes as the canvas's rows (canvasLeftOf); none where the host told no rows.
+type RoomState = PlaceProps & {
+  lens: Lens
+  app: boolean
+  layer: number
+  plan: Plan
+  columns: number
+  drawn?: Drawn
+  hidden?: number
+  starterFirst?: boolean
+  opened?: Nav
+  size?: TerminalSize
+  termRoom?: number
+}
 
 // What every view is told of the canvas it draws in (order D1): the layout's plan (the column's width, `stack`) and the pane's
 // columns. A view that does not take them yet leaves them be; one that does draws to that width, with no number of its own. Spread
@@ -145,13 +162,10 @@ const bodyNavOf = (nav: Nav): Nav =>
 // The seat the head names: the seat of the nav's face, else this seat ('' when the room names none).
 const seatOf = ({ nav, seat = '' }: { nav: Nav; seat?: string }): string => (nav.view === 'seat' && nav.name !== '' ? nav.name : seat)
 
-// "Back to SEAT" shows on the level up, on another seat's face and in the places off the us face; Settings shows on the
-// faces of us and in the Room place; the Shelf and the Room (under Operator) show on the faces of us alone.
+// "Back to SEAT" shows on the level up, on another seat's face and in the places off the us face.
 const isOwnFace = (nav: Nav, seat: string): boolean =>
   nav.view === 'feed' || nav.view === 'desk' || (nav.view === 'seat' && (nav.name === '' || nav.name === seat))
 const showsBack = (nav: Nav, seat: string): boolean => !isOwnFace(nav, seat)
-const showsPlaces = (nav: Nav): boolean => nav.view === 'feed' || nav.view === 'desk' || nav.view === 'seat' || nav.view === 'level'
-const showsSettings = (nav: Nav): boolean => showsPlaces(nav) || nav.view === 'room'
 const backWords = (seat: string): string => (seat === '' ? 'Back to this seat' : `Back to ${seat}`)
 
 // A word with its first letter big, for the lens word of the tray.
@@ -262,9 +276,10 @@ const noRoomView = (state: RoomState) => {
 
 // What the nav shows in place of the feed: the way back (in the place it is the head's "Back to the room"), then a
 // profile or the shelf.
-const backView = ({ ui, app, actions }: RoomState) => {
+const backView = ({ ui, app, size, actions }: RoomState) => {
   const { Button } = ui
-  return app
+  // the terminal's way back is the key line's b (small) or the tab row (wide), never a row of the place
+  return app || size !== undefined
     ? []
     : [
         <Button
@@ -321,6 +336,7 @@ const shelfPlace = (state: RoomState) => {
     surface: surfaceOf(state),
     // the shelf is no Letters: a wait's lean pick holds no hotkey there (the dock's Letters holds the 1)
     leanKey: !state.app,
+    small: state.size === 'small',
     place: { ...place, rules: place.rules.filter(rule => !takenOff.includes(rule.id)) },
     walks,
     showAll: shelfAll,
@@ -579,8 +595,14 @@ const lateRowsOf = (state: RoomState): number => {
 // The rows the canvas leaves for a list that pages: the pane's own rows less the bar and the dock (frame.tsx, an estimate), less the
 // rows of the door line and its Button when they stand over the page (`over`), and less the rows of the strip's line when one stands.
 // A host that gives no rows leaves the height unknown, and a list is not cut to a height nobody told.
+// The terminal has no bar over its canvas and no dock under it: its rows are the body's less the bar, the keys or the tabs and the status line
+// (termRoom), and the places subtract the strip's rows from what they are given, so those are added here.
 const canvasLeftOf = (state: RoomState, over: number): number =>
-  state.rows === undefined ? Number.POSITIVE_INFINITY : Math.max(LINK_ROWS + 1, canvasRowsOf(Math.max(LEAST_ROWS, state.rows), state.columns, over) - lateRowsOf(state))
+  state.rows === undefined || (!state.app && state.termRoom === undefined)
+    ? Number.POSITIVE_INFINITY
+    : !state.app
+      ? Math.max(LINK_ROWS + 1, (state.termRoom as number) + LINK_ROWS)
+      : Math.max(LINK_ROWS + 1, canvasRowsOf(Math.max(LEAST_ROWS, state.rows), state.columns, over) - lateRowsOf(state))
 const canvasRowsNow = (state: RoomState): number => canvasLeftOf(state, starterRowsOf(state))
 
 // The same without the door line: the canvas whole, for the body that carries the door line as its first block (it takes its rows on its page).
@@ -976,7 +998,7 @@ const settingsPlace = (state: RoomState) => {
     }
     return { lens, feed: [parts.groups.lenses], scene: [withBackgroundLine(state, parts.groups.scene)], rules: [parts.rules], secrets, versions }[section]
   }
-  return [...backView(state), parts.groups.lenses, parts.groups.scene, parts.rules, ...secrets, ...lens, ...versions, <Text key="nav-space"> </Text>]
+  return [...backView(state), ...reachLenses(state), parts.groups.lenses, parts.groups.scene, parts.rules, ...secrets, ...lens, ...versions, <Text key="nav-space"> </Text>]
 }
 
 // The Room place (order A-W6), under Operator alone: who sits, what it plays, the door, the programs running and what
@@ -1104,8 +1126,9 @@ const deskRowsOf = (state: Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now
     keeperRows({ walks: state.walks, seatsText: state.seatsText ?? '', seat: state.seat ?? '', now: state.now, zone: state.zone, entries: state.entries }, new Set(state.keeperOk ?? [])),
   )
 
-// The count the dock and the tray say: the rows that wait on him, letters, the keeper's picks and his open items; none for a seat's.
-const deskCountOf = (state: Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now' | 'zone' | 'entries' | 'deskCard' | 'keeperOk'>): number => hisCount(deskRowsOf(state))
+// The count the dock and the tray say: the rows that wait on him, letters, the keeper's picks and his open items; none for a seat's. The terminal's
+// Desk N, its status line and the band over the prompt (the register's bandText) say this one number.
+export const deskCountOf =(state: Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now' | 'zone' | 'entries' | 'deskCard' | 'keeperOk'>): number => hisCount(deskRowsOf(state))
 
 // HIS DESK (order DESK, D2), the place the pane opens on: the list of the open pile, or one item opened from it, a step from the desk. A letter opens
 // as a wait of this seat (publicView), with its picks. Under 128 columns the item takes the list's place with `‹ Desk`; from 128 it stands at the right.
@@ -1167,6 +1190,7 @@ function deskPlace(state: RoomState) {
       done: doneToday(card.items, now, zone),
       canvasRows: state.rows === undefined ? undefined : canvasRowsNow(state) - LINK_ROWS,
       page: state.pages?.[DESK_LIST] ?? 0,
+      small: state.size === 'small',
       ...(open === undefined ? {} : { open }),
       actions: {
         openPile: key => void actions.open({ view: 'desk', pile: key, ...(nav.group === undefined ? {} : { group: nav.group }) }),
@@ -1250,7 +1274,7 @@ const FACE_VIEWS: Record<FaceName, FaceView> = {
   shelf: state => [...(state.app ? noRoomView(state) : ABOVE[state.face](state)), ...navView(state)],
   settings: settingsPlace,
   // The Room place: the terminal keeps above it what the lens kept, as above the shelf.
-  room: state => [...(state.app ? noRoomView(state) : ABOVE[state.face](state)), ...roomPlace(state)],
+  room: state => [...(state.app ? noRoomView(state) : ABOVE[state.face](state)), ...roomPlace(state), ...reachSettings(state)],
 }
 
 // The path of the head, "ROOM › SEAT" (order A-S1, the words of A-M4): the room's name, a plain Button that goes one level
@@ -1295,73 +1319,104 @@ function pathView(state: RoomState) {
   )
 }
 
-// The terminal's header: a dot lit while a door runs, the path ROOM › SEAT, at the right the count of cards and
-// its cost in the quiet color off the Public lens (the faults too on the operator face); a dashed rule; the way
-// back and Settings, the shelf (under Operator) and the lens switch on one line, the shown lens the primary Button; a
-// second dashed rule.
-function terminalHead(state: RoomState) {
-  const { ui, face, nav, exists, cards, total, entries, seat = '', isDoorUp = false, actions } = state
-  const { Box, Text, Button } = ui
+// The place a press on a tab or a key opens, as a nav: the desk, the Room place (the door) or the shelf.
+const placeNavOf = (place: KeyPlace): Nav => (place === 'desk' ? { view: 'desk' } : place === 'door' ? { view: 'room' } : { view: 'shelf', by: 'kind' })
+
+// The tab the nav lights in the wide terminal: the desk (with a letter opened from it), the shelf (with a record), the door; none for any other.
+const tabOf = (nav: Nav): KeyPlace | undefined =>
+  nav.view === 'desk' || (nav.view === 'wait' && nav.from === FROM_DESK) ? 'desk' : nav.view === 'shelf' || nav.view === 'profile' ? 'shelf' : nav.view === 'room' ? 'door' : undefined
+
+// Whether the place open is a root of one of the three tabs: it has no Back, the tab is its way.
+const isTabRoot = (nav: Nav): boolean =>
+  (nav.view === 'desk' && nav.item === undefined) || (nav.view === 'shelf' && (nav.of === undefined || nav.of === '')) || (nav.view === 'room' && nav.card === undefined && nav.from === undefined)
+
+// Whether the small terminal is at rest: the bar and its keys alone, the seat's own face with nothing open (the register shows the seat's face
+// in place of the desk there). A room that is not read or not there says so in the place, so it is never at rest.
+const isRest = (nav: Nav, seat: string, exists: boolean | undefined): boolean => exists === true && ((nav.view === 'seat' && (nav.name === '' || nav.name === seat)) || (nav.view === 'feed' && nav.cardId === ''))
+
+// The terminal's status line: a dot lit while a door runs, the path ROOM › SEAT, then the quiet words (the door, what waits, the cards and the
+// cost); off the Public lens the cost and the count (the faults too under Operator) stand at the right, as the head said them.
+function terminalStatus(state: RoomState) {
+  const { ui, face, exists, cards, total, isDoorUp = false } = state
+  const { Box, Text } = ui
   const cost = costOf(cards)
   const meta =
     face === 'public'
       ? []
       : [countOf(total, 'card'), face === 'operator' ? headerMeta(cards) : cost > 0 ? `$${cost.toFixed(4)}` : ''].filter(part => part !== '')
-  return [
-    <Box key="head-top" flexDirection="row" justifyContent="space-between">
-      <Box flexDirection="row" columnGap={1}>
-        <Text color={isDoorUp ? LOOK.ok : LOOK.quiet}>●</Text>
-        {pathView(state)}
-      </Box>
+  return (
+    <Box key="status-line" flexDirection="row" flexWrap="wrap" columnGap={1}>
+      <Text color={isDoorUp ? LOOK.ok : LOOK.quiet}>●</Text>
+      {pathView(state)}
+      {exists && placeStatusTerminal(state)}
       {exists && meta.length > 0 && <Text color={LOOK.quiet}>{meta.join(' · ')}</Text>}
-    </Box>,
-    ruleView(ui, 'rule-head-top'),
-    <Box key="head-faces" flexDirection="row" flexWrap="wrap" columnGap={1}>
-      {showsBack(nav, seat) && (
+    </Box>
+  )
+}
+
+// THE TAB ROW IS ONE ROW at any wide width, from SMALL_COLUMNS (order mend terminal real, mend 2): Desk N, Shelf and Door always; then Settings and the
+// lens tabs, each whole, in that order, as many as the columns hold (a Button counted as the host draws it, views/cells.ts); the first that does not fit
+// ends the row. What the row leaves out is reached from a place: Settings from the Door (a Button at the end of it), a lens from the Lens line of
+// Settings. The Back, where a place deeper than a tab is open, stands first: its words, `Back to SEAT`, where the row holds them with the Settings tab,
+// else `Back`, else `‹` alone (the first that holds the three tabs and Settings, else the first that holds the three tabs).
+const TAB_GAP = 1
+type TabPlan = { back: string | undefined; settings: boolean; lenses: Face[]; left: { settings: boolean; lenses: Face[] } }
+function tabPlanOf(state: RoomState): TabPlan {
+  const { nav, seat = '', columns } = state
+  const waiting = deskCountOf(state)
+  const core = [waiting > 0 ? `Desk ${waiting}` : 'Desk', 'Shelf', 'Door'].map(label => buttonCells(label))
+  const coreCells = core.reduce((sum, cells) => sum + cells, 0) + TAB_GAP * (core.length - 1)
+  const optional: { settings: boolean; face?: Face; label: string }[] = [{ settings: true, label: 'Settings' }, ...lensesOf(settingsOf(state)).map(name => ({ settings: false, face: name, label: name }))]
+  // how many of the optional tabs stand, whole and in order, in a row that has `used` cells so far
+  const heldAt = (start: number): number => {
+    let used = start
+    let held = 0
+    while (held < optional.length && used + TAB_GAP + buttonCells(optional[held].label) <= columns) {
+      used += TAB_GAP + buttonCells(optional[held].label)
+      held += 1
+    }
+    return held
+  }
+  const backCells = (words: string): number => TAB_GAP + buttonCells(words, false, BACK_KEY)
+  const wantsBack = showsBack(nav, seat) && !isTabRoot(nav)
+  const words = [backWords(seat), 'Back', '‹']
+  const settingsCells = TAB_GAP + buttonCells('Settings')
+  const back = !wantsBack ? undefined : (words.find(one => coreCells + backCells(one) + settingsCells <= columns) ?? words.find(one => coreCells + backCells(one) <= columns) ?? '‹')
+  const held = heldAt(coreCells + (back === undefined ? 0 : backCells(back)))
+  const shown = optional.slice(0, held)
+  const left = optional.slice(held)
+  return {
+    back,
+    settings: shown.some(item => item.settings),
+    lenses: shown.flatMap(item => (item.face === undefined ? [] : [item.face])),
+    left: { settings: left.some(item => item.settings), lenses: left.flatMap(item => (item.face === undefined ? [] : [item.face])) },
+  }
+}
+
+// The line the Door ends with where the tab row has no room for Settings (and in the small terminal, which has no tab row): one Button that opens it.
+function reachSettings(state: RoomState) {
+  if (state.app || (state.size === 'wide' && !tabPlanOf(state).left.settings)) return []
+  const { ui, actions } = state
+  const { Button } = ui
+  return [<Button key="settings-door" label="Settings" onPress={() => void actions.open({ view: 'settings' })} />]
+}
+
+// The Lens line of the terminal's Settings, where the tab row has no room for a lens (and in the small terminal, which has no tab row): the lenses
+// left out, each a Button that sets it. The lens the head shows stays lit there too.
+function reachLenses(state: RoomState) {
+  if (state.app) return []
+  const lenses = state.size === 'wide' ? tabPlanOf(state).left.lenses : lensesOf(settingsOf(state))
+  if (lenses.length === 0) return []
+  const { ui, face, actions } = state
+  const { Box, Text, Button } = ui
+  return [
+    <Box key="settings-lens-line" flexDirection="row" flexWrap="wrap" columnGap={1}>
+      <Text key="settings-lens-word" color={LOOK.quiet}>
+        Lens
+      </Text>
+      {lenses.map(name => (
         <Button
-          key="back-room"
-          label={backWords(seat)}
-          variant="secondary"
-          onPress={() => {
-            void goBack(state)
-          }}
-        />
-      )}
-      {showsSettings(nav) && (
-        <Button
-          key="settings"
-          label="Settings"
-          variant="secondary"
-          onPress={() => {
-            void actions.open({ view: 'settings' })
-          }}
-        />
-      )}
-      {face === 'operator' && (
-        <Button
-          key="shelf"
-          label={`shelf (${entries.length})`}
-          variant={nav.view === 'shelf' ? 'primary' : 'secondary'}
-          dimColor={nav.view !== 'shelf'}
-          onPress={() => {
-            void actions.open({ view: 'shelf', by: 'kind' })
-          }}
-        />
-      )}
-      {face === 'operator' && (
-        <Button
-          key="room"
-          label="room"
-          variant={nav.view === 'room' ? 'primary' : 'secondary'}
-          dimColor={nav.view !== 'room'}
-          onPress={() => {
-            void actions.open({ view: 'room' })
-          }}
-        />
-      )}
-      {lensesOf(settingsOf(state)).map(name => (
-        <Button
-          key={`face-${name}`}
+          key={`lens-${name}`}
           label={name}
           variant={face === name ? 'primary' : 'secondary'}
           dimColor={face !== name}
@@ -1371,10 +1426,86 @@ function terminalHead(state: RoomState) {
         />
       ))}
     </Box>,
-    <Box key="head-rule" marginBottom={1}>
-      {ruleView(ui, 'rule-head-foot')}
-    </Box>,
   ]
+}
+
+// The wide terminal's tab row, the same on every place: Desk N, Shelf and Door, the open one primary and the others dim as the lens tabs mark
+// theirs; after them, dim, Settings and the lens tabs the head had, as many as the row holds (tabPlanOf).
+function terminalTabs(state: RoomState) {
+  const { ui, face, nav, seat = '', actions } = state
+  const { Box, Button } = ui
+  const lit = tabOf(nav)
+  const waiting = deskCountOf(state)
+  const plan = tabPlanOf(state)
+  const tabs: { place: KeyPlace; key: string; label: string }[] = [
+    { place: 'desk', key: 'desk', label: waiting > 0 ? `Desk ${waiting}` : 'Desk' },
+    { place: 'shelf', key: 'shelf', label: 'Shelf' },
+    { place: 'door', key: 'room', label: 'Door' },
+  ]
+  return (
+    <Box key="head-faces" flexDirection="row" columnGap={TAB_GAP}>
+      {plan.back !== undefined && (
+        <Button
+          key="back-room"
+          label={plan.back}
+          variant="secondary"
+          hotkey={BACK_KEY}
+          onPress={() => {
+            void goBack(state)
+          }}
+        />
+      )}
+      {tabs.map(tab => (
+        <Button
+          key={tab.key}
+          label={tab.label}
+          variant={lit === tab.place ? 'primary' : 'secondary'}
+          dimColor={lit !== tab.place}
+          onPress={() => {
+            void actions.open(placeNavOf(tab.place))
+          }}
+        />
+      ))}
+      {plan.settings && (
+        <Button
+          key="settings"
+          label="Settings"
+          variant="secondary"
+          dimColor
+          onPress={() => {
+            void actions.open({ view: 'settings' })
+          }}
+        />
+      )}
+      {plan.lenses.map(name => (
+        <Button
+          key={`face-${name}`}
+          label={name}
+          variant={face === name && lit === undefined ? 'primary' : 'secondary'}
+          dimColor={face !== name || lit !== undefined}
+          onPress={() => {
+            void actions.setFace(name)
+          }}
+        />
+      ))}
+    </Box>
+  )
+}
+
+// THE PANE IN THE TERMINAL, the parts round the place (order terminal step 1). Small: the key line d desk, o door, s shelf under the bar, with b back
+// at its end while a place is open, which returns to the bar and the keys alone; `bare` says the place is none. Wide: the tab row over the place and
+// the status line under it. `top`, `back` and `foot` are the elements over the place, over it again and under it (`back` stays empty: Back is in the
+// key line and in the tab row).
+function terminalFrame(state: RoomState): { top: any[]; back: any[]; foot: any[]; bare: boolean } {
+  const { ui, size, nav, seat = '', actions } = state
+  if (size === 'wide') return { top: [terminalTabs(state)], back: [], foot: [terminalStatus(state)], bare: false }
+  const rest = isRest(nav, seat, state.exists)
+  return {
+    top: [keyLineView({ ui, onOpen: place => void actions.open(placeNavOf(place)), ...(rest ? {} : { onBack: () => void goBack(state) }) })],
+    back: [],
+    foot: [],
+    bare: rest,
+  }
 }
 
 // "Back to SEAT": this seat's face, the lens kept (the lens is the pane's, not the nav's).
@@ -1541,13 +1672,29 @@ function canvasView(state: RoomState, body: any[], failure: any, list?: any[]) {
   )
 }
 
+// What waits on him in the terminal's status line, counted as the desk counts it (deskCountOf): "nothing waits on you" or "N waits on you"; on the
+// level up the seats' waits first, "T waiting, N on you".
+function deskWaitsLine(state: RoomState, isLevel: boolean): string {
+  const mine = deskCountOf(state)
+  const total = isLevel ? level({ walks: state.walks, seatsText: state.seatsText ?? '', seat: state.seat ?? '', now: state.now, zone: state.zone, entries: state.entries }).total : 0
+  if (total > 0) return `${total} waiting, ${mine} on you`
+  return waitsOnYouWords(mine)
+}
+
+// The words of Desk N: the status line under the terminal's place and the band over the prompt say the count so.
+export const waitsOnYouWords = (mine: number): string => (mine === 0 ? 'nothing waits on you' : `${mine} waits on you`)
+
 // The words of the status line (order A-S1): the door, then what waits on him in the Public lens ("nothing waits on
 // you", "N waits on you" of this seat, and on the level up "T waiting, N on you"), else the cards and the cost, as
 // the Operator status line has always said them. Its dollars are the cost of the cards it counts, so it says "on these cards":
-// the Room place's "Today" is the door's own day and is a different number.
+// the Room place's "Today" is the door's own day and is a different number. Under Operator the line beside it (terminalStatus) says the
+// cards, the faults and the cost, so here are the door's words alone.
 function statusWords(state: RoomState): string[] {
   const { cards, total, doorWord = '', lateWord = '', needWord = '', face, nav, walks, seatsText = '', seat = '', now, zone } = state
+  // The terminal's count is the desk's own (Desk N in its tabs): the letters, the keeper's picks and his open items; on the level up the seats' waits stand with it.
+  if (face === 'public' && !state.app) return [lateWord, needWord, doorWord, deskWaitsLine(state, nav.view === 'level')].filter(part => part !== '')
   if (face === 'public') return [lateWord, needWord, doorWord, waitsLine({ walks, seatsText, seat, now, zone }, nav.view === 'level')].filter(part => part !== '')
+  if (face === 'operator' && !state.app) return [lateWord, needWord, doorWord].filter(part => part !== '')
   return [lateWord, needWord, doorWord, countOf(total, 'card'), `$${costOf(cards).toFixed(2)} on these cards`].filter(part => part !== '')
 }
 
@@ -1563,7 +1710,7 @@ function ruleBar(state: RoomState) {
   }
   if (!app) {
     return [
-      <Box key="capture-bar" flexDirection="column" {...LOOK.bar}>
+      <Box key="capture-bar" flexDirection="column" {...LOOK.bar} height={BAR_HEIGHT}>
         <Box key="capture-target-rule" flexDirection="row" columnGap={1}>
           <Text color={LOOK.quiet}>a rule for the keeper</Text>
           <Button
@@ -1590,16 +1737,19 @@ function ruleBar(state: RoomState) {
 // The Pane. On the desktop app, VS Code and mobile it is a place: the scene as an Svg that fills the pane, by
 // the hour, with a letter on the sill while an ask waits and the window dark with the door down, and over it
 // one absolute column of 56 cells: the head, the shown face, the composer and the status line. In the terminal
-// (no Svg, no absolute Box) it is a column in the theme's keys: the header (a dot lit while a door runs, room in
-// bold, the count of cards and cost, dashed rules, the shelf and the faces), the shown face, the capture bar,
-// and under it one quiet status line: the door, the cards and the cost. The pane's own settings (its file in the
+// (no Svg, no absolute Box) it is a column in the theme's keys, in one of two layouts (terminalSize of views/frame.tsx), and it pages as the app
+// does: nothing scrolls. Small: the capture bar and one key line, d desk, o door, s shelf, the place a key opens under them with its Back. Wide:
+// the capture bar, the tab row (Desk N, Shelf, Door, then Settings and the lens tabs, dim), the place, and one quiet status line: a dot lit
+// while a door runs, the path, the door, what waits, the cards and the cost. The pane's own settings (its file in the
 // run folder) drive it: the scene off leaves no Svg, the hour held is the hour of the scene, a lens hidden has no
 // tab, and the plate says the time and the date over the scene. Settings is a place of its own: the cards of the
 // settings under the head, the scene behind, and no composer.
 export function paneView(props: PlaceProps) {
-  const { ui, surface, bodyColumns = 80, rows = 30, now, zone, isDoorUp = false, target, entries, actions } = props
-  const { Box, Svg } = ui as Ui & { Svg?: any }
+  const { surface, bodyColumns = 80, rows = 30, now, zone, isDoorUp = false, target, entries, actions } = props
+  const { Box, Svg } = props.ui as Ui & { Svg?: any }
   const app = isApp(surface) && Svg !== undefined
+  // The terminal's kit is marked, so every fit counts a Button as the terminal's host draws it (views/cells.ts); the app's is not.
+  const ui = app ? props.ui : asTerminal(props.ui)
   const settings = props.settings ?? DEFAULTS
   const face = shownLens(props.face, settings)
   // His desk is the Public lens's place: under Operator or Trace the first place of the dock shows that lens's own face (the card rows, the motion),
@@ -1628,6 +1778,7 @@ export function paneView(props: PlaceProps) {
       : undefined
   const state: RoomState = {
     ...props,
+    ui,
     nav,
     cards,
     current,
@@ -1642,30 +1793,15 @@ export function paneView(props: PlaceProps) {
     columns: bodyColumns,
     // The Letters body of this seat's own face carries the door line as its first block (order MR, R4): the pages after the first have the canvas whole.
     starterFirst: app && props.windowOpen !== false && props.exists === true && nav.view === 'seat' && !pagesItself(nav, props.seat ?? '', false),
+    ...(app ? {} : { size: terminalSize(bodyColumns, props.rows) }),
     ...(props.countDraws === true ? { drawn: drawnNow() } : {}),
   }
-  // NOTHING SCROLLS: a body longer than the canvas is paged by the block, or by the parts of its one card (views/paged.tsx). The places
-  // that page themselves (the Seats place, a seat's window, Answered, a letter of the desk and its walk) fit their rows already.
-  const paged = (body: any[], at: Nav, scope: string) => {
-    if (!app) return body
-    const room = (state.starterFirst === true ? canvasRowsPlain(state) : canvasRowsNow(state)) - LINK_ROWS
-    // A letter of the desk with its tabs pages its own words or rows inside its card (publicView), under its head, which stays.
-    const ownTabs = at.view === 'wait' && at.from === FROM_DESK && actions.letterTab !== undefined
-    const placed = ownTabs || pagesItself(at, props.seat ?? '', state.versionsCard?.table !== undefined && state.versionsCard.older !== true)
-      ? body
-      : pagedBody({ ui, plan, columns: bodyColumns, rows: room, pages: state.pages, scope, onPage: (list, page) => void actions.page?.(list, page) }, body)
-    // THE FIT (order FIT): a page that still passes the canvas gives its fixed parts way, else it is the one line (views/paged.tsx)
-    return state.rows === undefined ? placed : fitBody({ ui, plan, columns: bodyColumns, rows: room, paneRows: state.rows }, placed)
-  }
-  const faceBody = app && props.windowOpen === false ? [] : paged(FACE_VIEWS[faceOf(nav)](state), nav, '')
-  // From 128 columns an opened row stands at the right of its list (listOf): the list is drawn by the same face views, on its own nav.
-  const listNav = app && props.windowOpen !== false && plan.cols === 2 ? listOf(nav, props.seat ?? '', face) : undefined
-  const listBody = listNav === undefined ? undefined : paged(FACE_VIEWS[faceOf(listNav)]({ ...state, nav: listNav, opened: nav }), listNav, 'list-')
   // Public is the seat face: the bar says to the room there, and answers no card of the feed.
   const barCard = face === 'public' ? undefined : current
-  // The terminal holds the capture bar under its face; the terminal's Settings and Room place have none. The app has NO composer (order
-  // D2, still F1): his words go in the session's chat box. A rule's Input stands in the canvas, after the face's body.
-  const hasBar = !app && nav.view !== 'settings' && nav.view !== 'room'
+  // The terminal holds the capture bar over its place, the Room place (the Door tab) too, so the tab row and the key line stand at the same row
+  // on every place; the terminal's Settings has none. The app has NO composer (order D2, still F1): his words go in the session's chat box. A
+  // rule's Input stands in the canvas, after the face's body.
+  const hasBar = !app && nav.view !== 'settings'
   const adding = state.adding === true && actions.sendRule !== undefined
   const bar = !hasBar
     ? []
@@ -1698,15 +1834,53 @@ export function paneView(props: PlaceProps) {
         {props.failure}
       </Text>
     )
-  if (!app) {
+  // THE TERMINAL'S FRAME (order terminal step 1): the parts that stand round the place are made first, so the rows they take are known and the
+  // place is paged to what is left (state.termRoom). Small: the bar, the key line, and the place with its Back when one is open. Wide: the bar,
+  // the tabs, the place, the status line.
+  const frame = app ? undefined : terminalFrame(state)
+  if (frame !== undefined && props.rows !== undefined) {
+    const names = namesOf(ui as any)
+    const rowsOf = (parts: any[]): number => parts.reduce((sum: number, part) => sum + sizeOf(part, bodyColumns, names).h, 0)
+    // A BODY TOO SHORT FOR THE BAR (order mend terminal real, mend 6): when the rows the host gave are fewer than the bar and the key line need, the pane
+    // draws the key line alone, one row, so a key still opens a place when the dock is opened bigger. (The bar holds its own rows, BAR_HEIGHT.)
+    if (state.size === 'small' && props.rows < rowsOf([...bar, ...frame.top])) return <Box flexDirection="column">{frame.top}</Box>
+    state.termRoom = Math.max(1, props.rows - rowsOf([...bar, ...frame.top, failure, ...starterView(state), ...frame.back, ...frame.foot]))
+  }
+  // NOTHING SCROLLS: a body longer than the canvas is paged by the block, or by the parts of its one card (views/paged.tsx). The places
+  // that page themselves (the Seats place, a seat's window, Answered, a letter of the desk and its walk) fit their rows already. The terminal
+  // pages the same way, to the rows the frame leaves, in the one column of its columns.
+  const paged = (body: any[], at: Nav, scope: string) => {
+    if (!app && state.termRoom === undefined) return body
+    const room = app ? (state.starterFirst === true ? canvasRowsPlain(state) : canvasRowsNow(state)) - LINK_ROWS : (state.termRoom as number)
+    const framed: Plan = app ? plan : { ...plan, width: bodyColumns }
+    // A letter of the desk with its tabs pages its own words or rows inside its card (publicView), under its head, which stays.
+    const ownTabs = at.view === 'wait' && at.from === FROM_DESK && actions.letterTab !== undefined
+    const placed = ownTabs || pagesItself(at, props.seat ?? '', state.versionsCard?.table !== undefined && state.versionsCard.older !== true)
+      ? body
+      : pagedBody({ ui, plan: framed, columns: bodyColumns, rows: room, pages: state.pages, scope, onPage: (list, page) => void actions.page?.(list, page) }, body)
+    // THE FIT (order FIT): a page that still passes the canvas gives its fixed parts way, else it is the one line (views/paged.tsx). The terminal
+    // has no floor of FIT_LEAST rows: its rows are the host's own.
+    if (state.rows === undefined) return placed
+    const fitted = fitBody({ ui, plan: framed, columns: bodyColumns, rows: app ? room : room + Math.max(0, FIT_LEAST - state.rows), paneRows: state.rows }, placed)
+    // THE TERMINAL NEVER SAYS "needs N rows" while a page can hold a part (order mend terminal real, mend 4): the body is cut into its parts and paged
+    // under one row of links (views/termpage.tsx); the line stays only where not even one part stands with the links.
+    if (app || fitted.length !== 1 || (fitted[0]?.key ?? fitted[0]?.props?.key) !== 'fit-line') return fitted
+    return terminalPaged({ ui, columns: bodyColumns, room, pages: state.pages, onPage: (list, page) => void actions.page?.(list, page) }, body) ?? fitted
+  }
+  const faceBody = app && props.windowOpen === false ? [] : frame?.bare === true ? [] : paged(FACE_VIEWS[faceOf(nav)](state), nav, '')
+  // From 128 columns an opened row stands at the right of its list (listOf): the list is drawn by the same face views, on its own nav.
+  const listNav = app && props.windowOpen !== false && plan.cols === 2 ? listOf(nav, props.seat ?? '', face) : undefined
+  const listBody = listNav === undefined ? undefined : paged(FACE_VIEWS[faceOf(listNav)]({ ...state, nav: listNav, opened: nav }), listNav, 'list-')
+  if (frame !== undefined) {
     return (
       <Box flexDirection="column">
-        {terminalHead(state)}
+        {bar}
+        {frame.top}
         {failure}
         {starterView(state)}
+        {frame.back}
         {faceBody}
-        {bar}
-        {props.exists && placeStatusTerminal(state)}
+        {frame.foot}
       </Box>
     )
   }

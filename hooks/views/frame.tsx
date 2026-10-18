@@ -31,6 +31,27 @@ export const CANVAS_TOP = BAR_TOP + BAR_ROWS + SPACE.block
 export const CANVAS_LEAST = 6
 export const canvasRowsOf = (rows: number, columns: number, over = 0): number => Math.max(CANVAS_LEAST, rows - CANVAS_TOP - dockFootOf(columns) - Math.max(0, over))
 
+// THE PANE IN THE TERMINAL has two layouts, and this is the one place that says which (order terminal step 1): small when the body has fewer
+// than SMALL_ROWS rows, or fewer than SMALL_COLUMNS columns, else wide. Rows decide first: his pane is a dock at the side of Claude Code, 54
+// columns by about 38 rows (the lab's real capture of 0.8.65), which is wide; columns make it small only under 40, where the tab row cannot
+// hold Desk, Shelf and Door in one row. The two numbers are named here alone. A body whose rows the host did not tell is judged by its columns alone.
+export const SMALL_ROWS = 16
+export const SMALL_COLUMNS = 40
+export type TerminalSize = 'small' | 'wide'
+export const terminalSize = (columns: number, rows?: number): TerminalSize => (columns < SMALL_COLUMNS || (rows !== undefined && rows < SMALL_ROWS) ? 'small' : 'wide')
+
+// The rows of the terminal's body, as the host tells them, with no floor (the app's paneRows never gives under 24, which no short terminal has):
+// the body's own rows less one when it gives 11 or more, else the viewport's less 6 and one, as paneRows reads them. None when the host tells neither.
+const BODY_LEAST = 11
+const SURFACE_FOOT = 6
+export function terminalRowsOf(surfaceRows: unknown, bodyRows: unknown): number | undefined {
+  const count = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
+  const body = count(bodyRows)
+  const surface = count(surfaceRows)
+  const base = body !== undefined && body >= BODY_LEAST ? body : surface === undefined ? undefined : surface - SURFACE_FOOT
+  return base === undefined ? undefined : Math.max(1, base - 1)
+}
+
 // The width of the bar's middle (the date and the time, or the time alone), the columns from which the date stands, and the
 // columns from which the door's words stand beside its dot.
 const MIDDLE_WIDE = 22

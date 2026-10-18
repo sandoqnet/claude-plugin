@@ -4,11 +4,38 @@ import { isApp } from './glass'
 import { LOOK } from './look'
 import { THEME, cardProps } from './theme'
 import type { Plan } from './theme'
-import type { CaptureProps } from './types'
+import type { CaptureProps, Ui } from './types'
 
 // The composer's layout (order D1): the column's width and the pane's columns, as the other views of the app take them. With none the
 // composer is as wide as its place.
 export type ComposerLayout = { plan?: Plan; columns?: number }
+
+// THE KEY LINE of the small terminal (order terminal step 1): under the bar, ONE row of the three places that fit a short pane, each a plain
+// Button of its word alone with the key that opens it (the kit draws the keycap): d desk, o door, s shelf. While a place is open a fourth stands
+// at its end, b back, so the way back takes no row of its own. The keys are the Buttons' hotkeys (KEY_PLACES and KEY_BACK, which the tests read), so
+// a letter typed in the bar's Input stays a letter in the Input (a hotkey is the host's, held while no Input has the typing).
+export type KeyPlace = 'desk' | 'door' | 'shelf'
+export const KEY_PLACES: { key: string; place: KeyPlace }[] = [
+  { key: 'd', place: 'desk' },
+  { key: 'o', place: 'door' },
+  { key: 's', place: 'shelf' },
+]
+export const KEY_BACK = 'b'
+// The rows of the terminal's bar, the same empty and typed in (order mend terminal real, mend 7): its edge a row each side, the quiet line, and the
+// Input's two (its words, and the row the host keeps under them while it holds the focus). The bar Box has this height always, so the rows under it
+// never move as the person types.
+export const BAR_HEIGHT = 5
+export function keyLineView({ ui, onOpen, onBack }: { ui: Ui; onOpen: (place: KeyPlace) => void; onBack?: () => void }) {
+  const { Box, Button } = ui
+  return (
+    <Box key="key-line" flexDirection="row" flexWrap="wrap" columnGap={2}>
+      {KEY_PLACES.map(({ key, place }) => (
+        <Button key={`key-${place}`} plain hotkey={key} label={place} onPress={() => onOpen(place)} />
+      ))}
+      {onBack !== undefined && <Button key="back-room" plain hotkey={KEY_BACK} label="back" onPress={onBack} />}
+    </Box>
+  )
+}
 
 // The node's words for the bar when the words go to the room.
 const ROOM_PLACEHOLDER = 'write, paste, or drop anything'
@@ -122,7 +149,7 @@ export function captureView({ ui, nav, card, target, entries, surface, seatTo = 
       : [<Text key={`capture-target-${turn && card ? card.id : 'room'}`} color={LOOK.quiet}>{asked.line}</Text>]
 
   return [
-    <Box key="capture-bar" flexDirection="column" {...LOOK.bar}>
+    <Box key="capture-bar" flexDirection="column" {...LOOK.bar} height={BAR_HEIGHT}>
       {line}
       <Input
         key="say"

@@ -108,6 +108,9 @@ export type ShelfPlaceProps = {
   columns?: number
   // Whether the gate of a wait holds the hotkey 1 on its lean pick (gate.tsx): the shelf is no Letters, so the pane gives none there.
   leanKey?: boolean
+  // The small terminal (views/frame.tsx terminalSize): the head rows of the sections and "Add a rule" go (Settings holds the rules' own card), so the
+  // rows of the place are its waits, its rules, its answers and its items, and they page under the pager from the first.
+  small?: boolean
 }
 
 // "what · how" of an item: the parts the walk holds.
@@ -137,9 +140,10 @@ const ruleWho = (rule: PlaceRule): string =>
 // the terminal the same sections are a column in the theme keys with string-labeled Buttons, no hover and no hex.
 // The CLI host cannot draw the app branch. A part the room does not hold is left out of its row. Returns the
 // elements to sit among the children of the view that holds it.
-export function shelfPlaceView({ ui, surface, place, walks, showAll = false, actions, plan, columns, leanKey = true }: ShelfPlaceProps) {
+export function shelfPlaceView({ ui, surface, place, walks, showAll = false, actions, plan, columns, leanKey = true, small = false }: ShelfPlaceProps) {
   const { Box, Text, Button } = ui
   const app = isApp(surface)
+  const bare = small && !app
   const dim = app ? THEME.dim : LOOK.quiet
   const ink = {}
   const width = plan?.width
@@ -253,14 +257,14 @@ export function shelfPlaceView({ ui, surface, place, walks, showAll = false, act
   )
   const section = (id: string, title: string, count: number, children: any[]) => (
     <Box key={`place-${id}`} flexDirection="column">
-      {head(id, title, count)}
+      {!bare && head(id, title, count)}
       {children}
     </Box>
   )
   return [
-    <Box key="shelf-place" {...(app ? cardProps(width, columns) : { flexDirection: 'column', gap: 1 })}>
+    <Box key="shelf-place" {...(app ? cardProps(width, columns) : { flexDirection: 'column', gap: bare ? 0 : 1 })}>
       {section('waits', 'Waits for you', place.waits.length, waits)}
-      {section('rules', 'Your rules', place.rules.length, [...rules, addRule])}
+      {section('rules', 'Your rules', place.rules.length, bare ? rules : [...rules, addRule])}
       {section('answered', 'Answered today', place.answered.length, answered)}
       {section('shelf', 'On your shelf', place.shelf.length, [...items, moreButton])}
     </Box>,

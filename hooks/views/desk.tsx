@@ -10,14 +10,17 @@ import type { DeskCard, DeskItem, DeskRow, Group, Pile } from '../model/desk.ts'
 import { FOLD_KEY, foldOf, foldWords, rowWords } from '../model/keeperrow.ts'
 import type { KeeperFold } from '../model/keeperrow.ts'
 import { PAGE_NOT_SHOWN } from '../model/page'
-import { pageAt } from '../model/pages'
+import { pageAt, pageWords } from '../model/pages'
 import type { Page } from '../model/pages'
 import { ageWords } from '../model/profile'
+import { BUTTON_CELLS, buttonCells } from './cells'
 import { deskArt } from './deskart'
 import { pageView } from './page'
+import { EARLIER, moreWords } from './pager'
 import { CARD_ROWS } from './paged'
 import { pressBox, pressHigh, pressLinesOf, pressPagerRows, pressPagerView, pressStackRows, pressWidth } from './press'
 import { CELL, SPACE } from './space'
+import { terminalPagerRows } from './termpage'
 import { LOOK } from './look'
 import { PRESS, THEME, besideOf, cardProps, cellsOf, fitted, innerOf } from './theme'
 import type { Plan } from './theme'
@@ -27,6 +30,8 @@ import type { Ui } from './types'
 export const DESK_ROWS = 4
 // The rows of the names under the picture: the Buttons and the rule under the open one.
 const NAMES_ROWS = 2
+// The rows the terminal's card takes round its parts: its frame has an edge a side and no padding above or below.
+const TERMINAL_EDGE = 2
 // The list of the desk pages under this name (the page the register keeps, and the keys of the pager's boxes).
 export const DESK_LIST = 'desk'
 // From these columns a row says its age in its first line, with the arrow; under them the age goes to the dim line.
@@ -80,6 +85,9 @@ export type DeskViewProps = {
   page: number
   // The row open at the right of the list (from 128 columns): it keeps its open look.
   open?: string
+  // The small terminal (views/frame.tsx terminalSize): the card drops its piles row, its head and its foot, and pages its rows tight, so one item and
+  // the pager stand in the fewest rows the pane can have. The app and the wide terminal draw the whole card.
+  small?: boolean
   actions: DeskActs
 }
 
@@ -156,6 +164,10 @@ export function deskView(props: DeskViewProps) {
   const clear = rows.length === 0
   const reading = clear && card.state !== 'done' && card.cannot === '' && !card.older
   const board = card.opened
+  const small = props.small === true && !app
+  // The cells inside the terminal's frame (its edge and its padding a side) and the rows between two rows of its list: none in the small one.
+  const frameInner = Math.max(1, (columns ?? inner) - 4)
+  const between = app || !small ? PRESS.between : 0
 
   // ---- the rows of the list, with the cells and the lines each takes
   const shapeOf = (row: Entry): Shape => {
@@ -165,26 +177,36 @@ export function deskView(props: DeskViewProps) {
     if (!isHis(row)) return { first: `${ORIGIN_MARK[rowOrigin(row)]} ${wordsOf(row)}`, tail: '', dim: [], boxW }
     const tail = wide ? ageOf(row, now) : ''
     // A pick has one dim line, the keeper's note cut to the width; no note, no line.
-    if (row.row === 'pick') return { first: wordsOf(row), tail, dim: row.pick.note === '' ? [] : [fitted(row.pick.note, cells)], boxW }
+    if (row.row === 'pick') return { first: wordsOf(row), tail, dim: row.pick.note === '' ? [] : [fitted(row.pick.note, app ? cells : frameInner)], boxW }
     const opened = row.row === 'item' && board === row.item.id
-    return { first: wordsOf(row), tail, dim: wrapped(dimOf(row, group, wide, now, opened), cells), boxW }
+    // The terminal's dim line is ONE line of the frame's width, cut where it is longer: a line never wraps, so an item is its two rows.
+    return { first: wordsOf(row), tail, dim: app ? wrapped(dimOf(row, group, wide, now, opened), cells) : [fitted(dimOf(row, group, wide, now, opened), frameInner)], boxW }
   }
   const lineOf = (row: Entry): string => (row.row === 'item' ? (card.lines[row.item.id] ?? '') : '')
   const heightOf = (row: Entry): number => {
     const shape = shapeOf(row)
     const said = lineOf(row)
-    return pressHigh(1 + shape.dim.length) + (said === '' ? 0 : wrapped(said, inner).length)
+    // the terminal's row is the title and its dim lines, with no edge
+    return (app ? pressHigh(1 + shape.dim.length) : 1 + shape.dim.length) + (said === '' ? 0 : wrapped(said, inner).length)
   }
 
   // ---- the rows of the card besides its list, by what the canvas leaves: the picture goes first, then the foot's boxes become one line
   const footWidths = [pressWidth(`Answered today ${props.answered}`), cellsOf(`Done today ${props.done}`), ...(lit?.key === 'letter' ? [pressWidth('Letters')] : [])]
   const footBoxes = pressStackRows(pressLinesOf(footWidths, inner, beside))
-  const pagerRows = pressPagerRows(inner, columns)
-  const heads = firstSeat >= 0 ? 1 : 0
+  // The terminal draws the card as a frame with an edge and no padding above or below, its names and its foot as Buttons in rows that wrap in the
+  // frame, and a link row for the pager: the rows are counted for that, not for the boxes of the app. A Button is counted as the host draws it,
+  // "[ label ]" (BUTTON_CELLS, views/cells.ts).
+  const nameRows = pressLinesOf(piles.map(pile => cellsOf(`${pile.name} ${hisCount(pile.rows)}`) + BUTTON_CELLS), frameInner, 1)
+  const termFootRows = pressLinesOf([cellsOf(`Answered today ${props.answered} ›`) + BUTTON_CELLS, cellsOf(`Done today ${props.done}`), ...(lit?.key === 'letter' ? [cellsOf('Letters ›') + BUTTON_CELLS] : [])], frameInner, 1)
+  const pagerRows = app ? pressPagerRows(inner, columns) : terminalPagerRows(frameInner, shown.length) + between
+  // The line that heads the seats' rows is the app's and the wide terminal's; the small terminal draws the rows alone.
+  const heads = firstSeat >= 0 && !small ? 1 : 0
   // The card's rows besides its list: its edge and padding, the top (the picture, then the names), the head of the pile, the foot, and a row between each part.
   const fixedOf = (chrome: Chrome): number => {
+    if (small) return TERMINAL_EDGE
+    if (!app) return TERMINAL_EDGE + (clear ? 0 : nameRows) + 1 + (clear ? 0 : PRESS.between) + termFootRows
     const top = (chrome.picture ? DESK_ROWS : 0) + (clear ? 0 : NAMES_ROWS)
-    const parts = [top, 1 + (clear ? 0 : PRESS.between), chrome.footLine || !app ? 1 : footBoxes].filter(rows => rows > 0)
+    const parts = [top, 1 + (clear ? 0 : PRESS.between), chrome.footLine ? 1 : footBoxes].filter(rows => rows > 0)
     return CARD_ROWS + parts.reduce((sum, rows) => sum + rows, 0) + (parts.length - 1) * SPACE.line
   }
   const heights = shown.map(heightOf)
@@ -202,11 +224,11 @@ export function deskView(props: DeskViewProps) {
         ? { picture: false, footLine: false }
         : { picture: false, footLine: true }
   const budget = roomFor(chrome) - heads
-  const page: Page = pageAt(heights, budget, props.page, PRESS.between, pagerRows)
+  const page: Page = pageAt(heights, budget, props.page, between, pagerRows)
   const onPage = shown.slice(page.from, page.to)
   const seatHeadAt = (at: number): boolean => {
     const row = page.from + at
-    return firstSeat >= 0 && !hisEntry(shown[row]) && (row === firstSeat || at === 0)
+    return firstSeat >= 0 && !small && !hisEntry(shown[row]) && (row === firstSeat || at === 0)
   }
 
   // ---- the top: the picture, its regions and the names
@@ -227,7 +249,7 @@ export function deskView(props: DeskViewProps) {
     return element
   }
   const names =
-    piles.length === 0
+    piles.length === 0 || small
       ? null
       : app
         ? (
@@ -274,9 +296,10 @@ export function deskView(props: DeskViewProps) {
   // The terminal draws a row as a Button of its words and, for an item that is his, a Done beside it, the dim line under.
   const terminalRow = (row: Entry) => {
     if (row.row === 'fold') {
+      const words = `${foldWords(row.fold)}${row.open ? ' (open)' : ''}`
       return (
         <Box key={`slot-${FOLD_KEY}`} flexDirection="row" columnGap={1}>
-          <Button key={FOLD_KEY} label={`${foldWords(row.fold)}${row.open ? ' (open)' : ''}`} onPress={actions.foldPicks} />
+          <Button key={FOLD_KEY} label={fitted(words, Math.max(1, frameInner - BUTTON_CELLS - 1 - buttonCells('OK all')))} onPress={actions.foldPicks} />
           <Button key="ok-all" label="OK all" onPress={() => actions.keeperOkAll(row.fold.keys)} />
         </Box>
       )
@@ -285,13 +308,25 @@ export function deskView(props: DeskViewProps) {
     const shape = shapeOf(row)
     const said = lineOf(row)
     const id = row.row === 'item' ? row.item.id : ''
+    // The title is the press, its Done or Change and OK beside it; the age stands at the right of the row, dim, and the dim line under it says the
+    // kind, from and for. A line never wraps: the title is cut to what the frame leaves it (every Button is counted as the host draws it, "[ label ]"
+    // with BUTTON_CELLS, and a space between two), so a row is two lines.
+    const acts = (hasDone(row) ? 1 + buttonCells('Done') : 0) + (row.row === 'pick' ? 1 + buttonCells('Change') + 1 + buttonCells('OK') : 0)
+    const title = fitted(`${shape.first}${isHis(row) ? '' : ` · for ${forOf(row)}`}`, Math.max(1, frameInner - BUTTON_CELLS - acts - (shape.tail === '' ? 0 : cellsOf(shape.tail) + 1)))
     return (
       <Box key={`slot-${key}`} flexDirection="column">
-        <Box key={`row-${key}`} flexDirection="row" columnGap={1}>
-          <Button key={key} label={`${shape.first}${shape.tail === '' ? '' : ` ${shape.tail}`}${isHis(row) ? '' : ` · for ${forOf(row)}`}`} onPress={() => actions.openRow(row)} />
-          {hasDone(row) && <Button key={`done-${id}`} label="Done" onPress={() => actions.done(id)} />}
-          {row.row === 'pick' && <Button key={`change-${key}`} label="Change" onPress={() => actions.openRow(row)} />}
-          {row.row === 'pick' && <Button key={`ok-${key}`} label="OK" onPress={() => actions.keeperOk(row.pick.key)} />}
+        <Box key={`row-${key}`} flexDirection="row" justifyContent="space-between" columnGap={1}>
+          <Box key={`acts-${key}`} flexDirection="row" columnGap={1}>
+            <Button key={key} label={title} onPress={() => actions.openRow(row)} />
+            {hasDone(row) && <Button key={`done-${id}`} label="Done" onPress={() => actions.done(id)} />}
+            {row.row === 'pick' && <Button key={`change-${key}`} label="Change" onPress={() => actions.openRow(row)} />}
+            {row.row === 'pick' && <Button key={`ok-${key}`} label="OK" onPress={() => actions.keeperOk(row.pick.key)} />}
+          </Box>
+          {shape.tail !== '' && (
+            <Text key={`age-${key}`} color={LOOK.quiet}>
+              {shape.tail}
+            </Text>
+          )}
         </Box>
         {shape.dim.map((line, at) => (
           <Text key={`dim-${key}-${at}`} color={LOOK.quiet}>
@@ -367,10 +402,21 @@ export function deskView(props: DeskViewProps) {
       </Text>
     </Box>
   )
+  // The terminal's pager: one row of plain links, `‹ Earlier` at the left, the page's words quiet, `N more ›` at the right, with no box and no region.
+  const terminalPager = (shown: Page) =>
+    shown.pages <= 1 ? null : (
+      <Box key={`${DESK_LIST}-pager`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+        {shown.page > 0 && <Button key={`${DESK_LIST}-earlier`} label={EARLIER} onPress={() => actions.page(shown.page - 1)} />}
+        <Text key={`${DESK_LIST}-page`} color={LOOK.quiet}>
+          {pageWords(shown)}
+        </Text>
+        {shown.after > 0 && <Button key={`${DESK_LIST}-more`} label={moreWords(shown.after)} onPress={() => actions.page(shown.page + 1)} />}
+      </Box>
+    )
   const list =
     lit === undefined ? null : (
-      <Box key="desk-pile" flexDirection="column" gap={PRESS.between}>
-        {headOf(lit)}
+      <Box key="desk-pile" flexDirection="column" gap={between}>
+        {!small && headOf(lit)}
         {onPage.map((row, at) => (
           <Box key={`on-${keyOf(row)}`} flexDirection="column">
             {seatHeadAt(at) && (
@@ -381,13 +427,13 @@ export function deskView(props: DeskViewProps) {
             {rowView(row)}
           </Box>
         ))}
-        {pressPagerView({ ui, list: DESK_LIST, page, inner, columns, onPage: actions.page })}
+        {app ? pressPagerView({ ui, list: DESK_LIST, page, inner, columns, onPage: actions.page }) : terminalPager(page)}
       </Box>
     )
 
   // ---- the foot: Answered today (a place), Done today (a count: no place lists the items done yet), and under the Letters pile the way to the place
   const foot =
-    chrome.footLine || !app ? (
+    small ? null : chrome.footLine || !app ? (
       !app ? (
         <Box key="desk-foot" flexDirection="row" flexWrap="wrap" columnGap={1}>
           <Button key="to-answered" label={`Answered today ${props.answered} ›`} onPress={actions.openAnswered} />

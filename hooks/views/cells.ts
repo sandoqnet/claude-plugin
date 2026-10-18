@@ -2,24 +2,36 @@
 // as the pane asks it, so a place knows whether it fits the canvas and pages when it does not. NOTHING SCROLLS, and the host does not
 // tell the pane the rows a card takes, so the pane counts them here: a column stacks its children by its gap, a row sets them side by
 // side by its column gap and wraps them when it is told to, a border and the padding take a cell a side, a Text wraps at its words, a
-// Button is its label alone on one row. It is an estimate of the kit's flex in cells, not the app's own drawing: the eye in the app is the last
-// proof. It imports no view and no host module but the sizes of the press box in views/theme.ts; a kit's parts are named by the `ui` it
-// is given (the app's own components, or the strings of the test kit).
+// Button is its label alone on one row in the app (the terminal's is below). It is an estimate of the kit's flex in cells, not the app's own drawing:
+// the eye in the app is the last proof. It imports no view and no host module but the sizes of the press box in views/theme.ts; a kit's parts are
+// named by the `ui` it is given (the app's own components, or the strings of the test kit).
 import { CELL } from './space'
 import { PRESS, isPressBox } from './theme'
 
 export type Size = { w: number; h: number }
 
 // The names of the parts of a kit, by the kit's own: `Box`, `Text`, `Button`, `Select`, `Input`, `Svg`, `Markdown`. The app's parts are components the
-// kit gives; a kit whose parts have run already (the test kit's) leaves the element with the part's name as its type.
-export type Names = (type: unknown) => string
+// kit gives; a kit whose parts have run already (the test kit's) leaves the element with the part's name as its type. `terminal` says the kit is the
+// terminal's (asTerminal), whose Buttons are counted as the host draws them.
+export type Names = ((type: unknown) => string) & { terminal?: boolean }
 
 const PARTS = ['Box', 'Text', 'Button', 'Select', 'Input', 'Svg', 'Markdown']
 
-export const namesOf =
-  (ui: Record<string, unknown>): Names =>
-  type =>
-    PARTS.find(name => ui[name] === type) ?? (typeof type === 'string' ? (PARTS.find(name => name === type) ?? '') : '')
+export function namesOf(ui: object): Names {
+  const kit = ui as Record<string, unknown>
+  const names: Names = type => PARTS.find(name => kit[name] === type) ?? (typeof type === 'string' ? (PARTS.find(name => name === type) ?? '') : '')
+  names.terminal = kit.terminal === true
+  return names
+}
+
+// THE BUTTON AS THE TERMINAL'S HOST DRAWS IT, counted in this one place: "[ label ]", the label and FOUR cells (the two brackets and a space inside
+// each); a plain Button is its label alone, and one that holds a key has the keycap before it, "d: desk" (the key, a colon and a space). The app's
+// Button is its own drawing and counts the label and two (sizeOf below). The pane marks the kit it draws the terminal with by asTerminal.
+export const BUTTON_CELLS = 4
+const KEYCAP_CELLS = 2
+export const buttonCells = (label: string, plain = false, hotkey?: string): number =>
+  label.length + (plain ? 0 : BUTTON_CELLS) + (typeof hotkey === 'string' && hotkey !== '' ? hotkey.length + KEYCAP_CELLS : 0)
+export const asTerminal = <T extends object>(ui: T): T & { terminal: true } => ({ ...ui, terminal: true })
 
 const isElement = (node: any): boolean => typeof node === 'object' && node !== null && 'type' in node
 
@@ -113,6 +125,7 @@ export function sizeOf(node: any, max: number, names: Names): Size {
   }
   if (kind === 'Button') {
     const label = String(props.label ?? wordsOf(node))
+    if (names.terminal === true) return { w: buttonCells(label, props.plain === true, props.hotkey), h: 1 }
     return { w: props.plain ? label.length : label.length + 2, h: 1 }
   }
   if (kind === 'Markdown') return typeof props.text === 'string' ? markdownSize(props.text, max) : { w: 0, h: 0 }

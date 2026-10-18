@@ -1,4 +1,4 @@
-# Load room-pane 0.8.59 (checked on Claude Code v2.1.290)
+# Load room-pane 0.8.62 (checked on Claude Code v2.1.290)
 
 ## What it needs
 
@@ -28,7 +28,7 @@ X.Y.Z is the pane's version, the one `/plugin` shows after the install.
    source. Remove that marketplace: `claude plugin marketplace remove sandoq`. Then quit the
    desktop app and open it again. When `sandoq` comes from GitHub, nothing old stands: skip this
    step, and never run `claude plugin uninstall sandoq@sandoq`, for that is this pane.
-1. In a terminal run `claude plugin marketplace add sandoqnet/claude-plugin#pane-v0.8.59`. For
+1. In a terminal run `claude plugin marketplace add sandoqnet/claude-plugin#pane-v0.8.62`. For
    another release, say its tag: `pane-v` and the version.
 2. Run `claude plugin install sandoq@sandoq`. It may say that three user config options are not
    yet set. All three are optional, and each is right when left empty:
@@ -64,10 +64,10 @@ it: the app needs no restart.
    `claude plugin update sandoq@sandoq`. With the developer way, replace the folder named in
    `CLAUDE_CODE_PLUGIN_DIRS`.
 2. Open a new session. After an update `/sandoq` is no command in a session that began before it.
-3. Check the version with `/plugin` (Installed tab): it is 0.8.59. The Operator lens says it too, at
-   its foot: "pane 0.8.59 · draws N · scene N".
+3. Check the version with `/plugin` (Installed tab): it is 0.8.62. The Operator lens says it too, at
+   its foot: "pane 0.8.62 · draws N · scene N".
 
-An install of 0.8.58 takes no update while the number is the same, so the number moved to 0.8.59.
+An install of 0.8.61 takes no update while the number is the same, so the number moved to 0.8.62.
 
 ## Renew a pane that stands
 
@@ -84,7 +84,7 @@ and then `claude plugin install sandoq@sandoq`.
 3. When the source is another one, such as a folder: run `claude plugin marketplace remove sandoq`,
    then do the install steps from the top (step 0 says what the folder one may hold), then open a
    new session.
-4. Check: `/plugin` says 0.8.59, and the Operator lens says "pane 0.8.59" at its foot.
+4. Check: `/plugin` says 0.8.62, and the Operator lens says "pane 0.8.62" at its foot.
 
 Claude keeps the options `bridge`, `gate` and `sandoq` by plugin id, so a move loses the ones you
 set by hand: set them again after the move. A pane that you turned off stays off.
@@ -213,3 +213,9 @@ run in the room's folder. The bar's "To the room" is your own card: `sandoq room
 one call, with no feed after it. The tool
 `room_say` and the command `/room-say` say as the session: `sandoq room say` run in the session's
 folder, where sandoq reads the seat.
+
+A session with no pane host, such as a cloud session, loads no pane. There `/sandoq:seat-open ROOM
+SEAT` makes the session a seat of a joined room (sandoq 0.4.22 or later) and `/sandoq:seat-shut`
+ends it. Both write only to the plugin's data folder, in `seats`: a state file and a lock file for
+each session. A fourth hook, `node seatwake.ts wake` on Stop and on SessionStart, waits for the
+seat's rows there, and says nothing in a session with no open seat.

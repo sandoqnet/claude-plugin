@@ -1958,6 +1958,9 @@ function refuse($): Posted {
 // --session before the text. The kit gives the pane no id of its own, so the hook's file is the one place it is read; a folder with no id
 // passes none, and the id kept in memory still makes the card his. The argv is ONE pure function, sayArgv of host.ts.
 const sayingSession = (): string => newestIdOf(yourIds)
+// A say in THIS room passes that session only when no seat is open here, or the open seat is of this very room (matched by name). A session
+// that is the seat of another room would have the door send the card to it, and the card would be lost (his laptop, cloud-1 and desk-salam).
+const sessionInThisRoom = (): string => (seatOpen === undefined || seatOpen.room === roomName() ? sayingSession() : '')
 
 // A card: `room.sh say` locally (it prints the card's ULID), `sandoq room say` for a marked room (run in the session's folder,
 // so sandoq names the seat), a plain post in the world. The room's own line of a card the door did not take is toasted, unless quiet.
@@ -1965,7 +1968,7 @@ const sayingSession = (): string => newestIdOf(yourIds)
 async function sayCard($, text: string, isQuiet = false): Promise<Posted> {
   host = await detectMode(ioOf($))
   if (cannotSend()) return refuse($)
-  const sent = await runPost($, isLocal() ? sayArgv(host, text, sayingSession()) : worldPostArgv(host.cliPy, text), isQuiet, 'the say', true)
+  const sent = await runPost($, isLocal() ? sayArgv(host, text, sessionInThisRoom()) : worldPostArgv(host.cliPy, text), isQuiet, 'the say', true)
   if (sent.note !== '' && !isQuiet) $.ui.toast(sent.note, { timeoutMs: 15000 })
   // The card a say made is his: its id is the last line the say printed (room.sh says the bare ULID, card.py a dot and the ULID), and a
   // say whose last line is none gives none. A card the door did not take is made all the same, so its id is kept too.
@@ -2185,7 +2188,7 @@ async function doAtSay($, words: string): Promise<string> {
   }
   let run: { exitCode?: number; stdout?: string; stderr?: string }
   try {
-    run = await runWithin($, sayArgv(host, words, sayingSession()), LIMIT.send, 'the say to the seat')
+    run = await runWithin($, sayArgv(host, words, sessionInThisRoom()), LIMIT.send, 'the say to the seat')
   } catch (error) {
     if (isUnanswered(error)) return `room: ${error.message}\n${NOT_SENT}`
     return `room: post failed: ${scrub(String(error)).slice(0, 160)}\nNothing was sent.`

@@ -33,7 +33,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.59'
+export const VERSION = '0.8.62'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
 export const SANDOQ_OPTION_NAME = 'sandoq'
 
@@ -169,7 +169,8 @@ export const roomFileArgv = (host: Host, seat: string, file: string): string[] |
   if (host.marked !== true || (host.sandoq ?? '') === '' || !DISC_NAME.test(name) || !SEAT_NAME.test(seat) || !fileNameFit(file)) return undefined
   return inRunArgv(host, [host.sandoq ?? '', ROOM_NOUN, OPEN_VERB, name, FILE_KIND, seat, file])
 }
-export const roomAppVersionArgv = (host: Host): string[] => [host.sandoq ?? '', '--version']
+export const sandoqVersionArgv = (sandoq: string): string[] => [sandoq, '--version']
+export const roomAppVersionArgv = (host: Host): string[] => sandoqVersionArgv(host.sandoq ?? '')
 
 // A Claude session as the seat of a joined room (/sandoq open ROOM SEAT and /sandoq shut). SESSION_OPEN_FROM is the first sandoq that has the verbs below
 // (session cut 1 of the room's sandoq); under it /sandoq open says one line and runs nothing but the version. Tonight the open state is the pane's own,

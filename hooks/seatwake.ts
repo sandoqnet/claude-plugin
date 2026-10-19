@@ -4,15 +4,15 @@
 //                                 `sandoq room seat off`. It prints ONE line (sandoq's own, or the one that says why nothing ran) and exits 0. WORDS is `-` when the
 //                                 words of the user are on the input (a quoted heredoc, so no shell reads them); they reach the program as argv words only.
 //   `node seatwake.ts wake`       an asyncRewake command hook on Stop and SessionStart: a pass-through to `sandoq room wake --hook`. The hook's JSON on its input
-//                                 goes to sandoq as it came, and sandoq's err and exit code come back whole (rows are the turn on the err with exit 2, which wakes
-//                                 the idle session). No sandoq, or one under SEAT_FOLDER_FROM: exit 0 at once, in silence. Nothing else: no state, no lock, no turn text.
+//                                 goes to sandoq as it came; a real wake (exit 2, the rows on the err) comes back whole and wakes the idle session. A usage error or any
+//                                 exit that is not a wake is silent, exit 0. No sandoq, or one under WAKE_HOOK_FROM: exit 0 at once, in silence. No state, no lock, no turn text.
 // A folder with no entry in sandoq is silence, so in the desktop app, where the pane's own seat writes no entry, the hook never wakes twice.
 import { spawn, spawnSync } from 'node:child_process'
 import type { SpawnSyncReturns } from 'node:child_process'
 import { statSync } from 'node:fs'
 
 import { findSandoq } from './bridge.ts'
-import { SEAT_FOLDER_FROM, folderSeatArgv, folderSeatOffArgv, folderWakeHookArgv, roomAppHas, sandoqVersionArgv } from './host.ts'
+import { SEAT_FOLDER_FROM, folderSeatArgv, folderSeatOffArgv, folderWakeHookArgv, roomAppHas, sandoqVersionArgv, wakeExitOf, WAKE_HOOK_FROM } from './host.ts'
 import { SEAT_COMMAND_USAGE, SEAT_NO_SANDOQ, commandWordsOf, seatNeedsLine } from './model/sessionseat.ts'
 
 const VERSION_MS = 5000
@@ -28,11 +28,11 @@ const isFile = (path: string): boolean => {
   }
 }
 
-// Whether the program says a version that has the seat of a folder.
-function hasFolderSeat(sandoq: string): boolean {
+// Whether the program says a version from FROM on.
+function hasVersion(sandoq: string, from: string): boolean {
   const [program, ...args] = sandoqVersionArgv(sandoq)
   const said = spawnSync(program, args, { encoding: 'utf8', timeout: VERSION_MS })
-  return said.status === 0 && roomAppHas(`${said.stdout ?? ''}`, SEAT_FOLDER_FROM)
+  return said.status === 0 && roomAppHas(`${said.stdout ?? ''}`, from)
 }
 
 // ---- the inline line of the commands: `open ROOM [SEAT]` and `shut`
@@ -51,20 +51,27 @@ function seatLine(words: string): string {
   if (parsed.word === 'usage') return SEAT_COMMAND_USAGE
   const sandoq = findSandoq(process.env, isFile)
   if (sandoq === undefined) return SEAT_NO_SANDOQ
-  if (!hasFolderSeat(sandoq)) return seatNeedsLine(SEAT_FOLDER_FROM)
+  if (!hasVersion(sandoq, SEAT_FOLDER_FROM)) return seatNeedsLine(SEAT_FOLDER_FROM)
   const [program, ...args] = parsed.word === 'shut' ? folderSeatOffArgv(sandoq) : folderSeatArgv(sandoq, parsed.room, parsed.seat)
   return sandoqLine(spawnSync(program, args, { encoding: 'utf8', timeout: SEAT_MS }))
 }
 
-// ---- the hook: a pass-through. The input and the err are the hook's own, handed to sandoq and back whole; its out is left out, since a hook's out is read as json.
+// ---- the hook: a pass-through. The input is the hook's own, handed to sandoq; the err is gathered and goes back whole only for a real wake; its out is left out, since a hook's out is read as json.
 function wake(): Promise<number> {
   const sandoq = findSandoq(process.env, isFile)
-  if (sandoq === undefined || !hasFolderSeat(sandoq)) return Promise.resolve(0)
+  if (sandoq === undefined || !hasVersion(sandoq, WAKE_HOOK_FROM)) return Promise.resolve(0)
   return new Promise(resolve => {
     const [program, ...args] = folderWakeHookArgv(sandoq)
-    const child = spawn(program, args, { stdio: ['inherit', 'ignore', 'inherit'] })
+    const child = spawn(program, args, { stdio: ['inherit', 'ignore', 'pipe'] })
+    let err = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', chunk => (err += chunk))
     child.on('error', () => resolve(0))
-    child.on('close', code => resolve(typeof code === 'number' ? code : 0))
+    child.on('close', code => {
+      const exit = wakeExitOf(code, err)
+      if (exit === 2) process.stderr.write(err)
+      resolve(exit)
+    })
     // A signal to this hook ends the wake, and the hook ends quiet.
     for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.on(signal, () => child.kill('SIGTERM'))
   })

@@ -1,4 +1,4 @@
-# room-pane 0.8.75
+# room-pane 0.8.76
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -144,13 +144,14 @@ The plugin keeps no state, no lock and no turn text of its own. The commands han
 to the script on a quoted heredoc, so no shell reads them (only the first line counts), and the
 script runs the verb with them as argv words. A sandoq under 0.4.28 is one line that the seat
 needs 0.4.28. One asyncRewake command hook on Stop and on SessionStart, `node hooks/seatwake.ts
-wake`, is a pass-through to `sandoq room wake --hook`: the hook's input goes to sandoq as it came,
-and sandoq's stderr and exit code come back whole. Rows are the turn on stderr with exit 2, which
-wakes the idle session; a folder with no entry, or a wake that runs, is silence. No sandoq, or one
-under 0.4.28, is exit 0 and silence. The pane's own `/sandoq open` writes no folder entry, so the
-hook stays silent in the desktop app; the pane opened in a folder that sandoq seats says one line
-and opens no second wake. The rules of the seat are the skill `sandoq-seat`, not the commands. The
-seat's say is a Bash command, which a session may ask about: the rule `Bash(sandoq room say:*)`
+wake`, is a pass-through to `sandoq room wake --hook`: the hook's input goes to sandoq as it came.
+Rows are the turn on stderr with exit 2, which wakes the idle session, and come back whole; a
+folder with no entry, or a wake that runs, is silence. A usage error, or any exit that is not a
+wake, is silent, exit 0. No sandoq, or one under 0.4.29, is exit 0 and silence (the seat verbs
+need 0.4.28). The pane's own `/sandoq open` writes no folder entry, so the hook stays silent in the
+desktop app; the pane opened in a folder that sandoq seats says one line and opens no second wake.
+The rules of the seat are the skill `sandoq-seat`, not the commands.
+The seat's say is a Bash command, which a session may ask about: the rule `Bash(sandoq room say:*)`
 in the project's permissions lets it run; nothing in the plugin writes settings. Not seen yet: a
 real local session with no pane that sits by `/sandoq:seat-open` and wakes on a row.
 
@@ -335,7 +336,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.75 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.76 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,

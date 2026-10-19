@@ -9,6 +9,7 @@ import {
   ROOM_APP_FROM,
   ROOM_APP_LIMIT,
   ROOM_PAGE_FROM,
+  SEAT_FOLDER_FROM,
   SESSION_OPEN_FROM,
   SHELF_FILES_FROM,
   VERSION,
@@ -53,6 +54,7 @@ import {
   readText,
   roomNewArgv,
   roomStartArgv,
+  folderSeatShowArgv,
   sandoqFault,
   sandoqIn,
   seatRowsArgv,
@@ -133,6 +135,7 @@ import {
   NONE_OPEN,
   OPEN_USAGE,
   RE_REFUSED,
+  SEATED_BY_SANDOQ,
   SEAT_WORD,
   WAIT_LINE,
   badRowLine,
@@ -147,6 +150,7 @@ import {
   rowsText,
   seatPrompt,
   seatWordsOf,
+  seatedByLine,
   shutLine,
   shutToast,
   submitRefusedLine,
@@ -2664,13 +2668,21 @@ async function seatProgram($): Promise<string> {
   return host.sandoq || host.maker || (await sandoqIn(ioOf($), host.session))
 }
 
-async function sandoqHasSeats($, sandoq: string): Promise<boolean> {
+// What the sandoq program says to --version, '' when it did not answer.
+async function sandoqSaid($, sandoq: string): Promise<string> {
   try {
     const run = await runWithin($, roomAppVersionArgv({ ...host, sandoq }), LIMIT.open, 'sandoq --version')
-    return run.exitCode === 0 && roomAppHas(String(run.stdout ?? ''), SESSION_OPEN_FROM)
+    return run.exitCode === 0 ? String(run.stdout ?? '') : ''
   } catch {
-    return false
+    return ''
   }
+}
+
+// Whether sandoq seats this folder (`room seat` alone, from SEAT_FOLDER_FROM): the seat of the folder is sandoq's, and its hook does the wake. A fault and a folder
+// with no entry both say no.
+async function folderIsSeated($, sandoq: string): Promise<boolean> {
+  const shown = await runSeat($, folderSeatShowArgv(sandoq), 'the read of the seat of this folder')
+  return shown.failed === '' && seatedByLine(shown.out)
 }
 
 // The rows kept become ONE turn. A submit that was taken keeps nothing; one that was refused is said on the card and the rows wait for the next.
@@ -2765,7 +2777,10 @@ async function doOpenSeat($, room: string, seat: string): Promise<string> {
   const sandoq = await seatProgram($)
   if (sandoq === '') return NO_SANDOQ
   // Under the sandoq that has the verbs nothing is run but its version.
-  if (!(await sandoqHasSeats($, sandoq))) return underLine(SESSION_OPEN_FROM)
+  const said = await sandoqSaid($, sandoq)
+  if (!roomAppHas(said, SESSION_OPEN_FROM)) return underLine(SESSION_OPEN_FROM)
+  // A folder that sandoq seats has its wake by the hook of sandoq: the pane opens no second one.
+  if (roomAppHas(said, SEAT_FOLDER_FROM) && (await folderIsSeated($, sandoq))) return SEATED_BY_SANDOQ
   // The rows that waited are read once, as one turn. A refusal is sandoq's line, shown whole, and nothing is kept or started. The pass prints the rows of any
   // hearer of the order, so only the rows to this seat make the turn.
   const passed = await runSeat($, seatRowsArgv(sandoq, room), 'the read of the rows that waited')

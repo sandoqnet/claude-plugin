@@ -1,4 +1,4 @@
-# room-pane 0.8.74
+# room-pane 0.8.75
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -135,31 +135,24 @@ A say of yours in this room names this session only when no seat is open here, o
 is of this very room. With a seat open in another room it is a plain card, so the door does not
 send it to that seat's session.
 
-A session with no pane host (a cloud session) loads no kit module, but the plugin's command hooks
-and its commands run. There `/sandoq:seat-open ROOM SEAT` and `/sandoq:seat-shut` are the road
-(sandoq 0.4.22 or later; both files are listed in plugin.json). Their own inline line, `node
-hooks/seatwake.ts do ...`, writes or drops one state file per session in the plugin's data folder
-and says one line. The open command is a fenced block that hands the typed words to the script on
-a quoted heredoc, so no shell reads them (only the first line of them counts). One asyncRewake
-command hook on Stop and on SessionStart, `node hooks/seatwake.ts wake`, reads that state. With
-none it exits 0 at once and says nothing, so every session with the plugin may run it, and the
-desktop app, where the pane writes no such state, is never woken twice. With a state it takes a
-lock (a file per session that holds the pid of its wake: a Stop while a wake runs starts none, and
-the lock of a dead process is taken over), runs `sandoq room wake ROOM --next --seat SEAT --json`
-and, on rows, prints the turn on stderr and exits 2, which wakes the idle
-session. The turn is the same text, but its answer line is "Answer with Bash: sandoq room say --room
-ROOM TEXT, TEXT as one quoted word." and it carries the seat rules, since no tool and no prompt
-context are there. No sandoq, a sandoq under 0.4.22, or a wake that ends with no rows is one line on
-stderr and exit 2, said once, and the state stays. `/sandoq:seat-shut` drops the state and ends the
-wake, and so does a SessionEnd command hook (`seatwake.ts end`) when the session ends. A hard
-stop of the host may skip that hook, and then the state stays until a shut or an open of that
-session. A cloud environment may name the seat with no command: its setup sets `SANDOQ_SEAT` to
-`ROOM SEAT`, and the wake of a session with no state opens that seat, once for a session and a
-value (a shut stays shut). A bad value is one line, said once. Set it in a cloud environment
-only: in the desktop app the pane opens the seat. The seat's say is a Bash command, which a
-session may ask about: the rule `Bash(sandoq room say:*)` in the project's permissions lets it
-run, and the open command says so; nothing in the plugin writes settings. Not seen yet: a real
-cloud session.
+The seat with no pane (sandoq 0.4.28 or later). A session with no pane host (a cloud session, or a
+local one with no pane) loads no kit module, but the plugin's command hooks and its commands run.
+There `/sandoq:seat-open ROOM [SEAT]` runs `sandoq room seat ROOM [SEAT]` and `/sandoq:seat-shut`
+runs `sandoq room seat off`; each shows sandoq's one line (both files are listed in plugin.json).
+The seat is the folder's: sandoq keeps it, in its own config folder, and it stands until seat off.
+The plugin keeps no state, no lock and no turn text of its own. The commands hand the typed words
+to the script on a quoted heredoc, so no shell reads them (only the first line counts), and the
+script runs the verb with them as argv words. A sandoq under 0.4.28 is one line that the seat
+needs 0.4.28. One asyncRewake command hook on Stop and on SessionStart, `node hooks/seatwake.ts
+wake`, is a pass-through to `sandoq room wake --hook`: the hook's input goes to sandoq as it came,
+and sandoq's stderr and exit code come back whole. Rows are the turn on stderr with exit 2, which
+wakes the idle session; a folder with no entry, or a wake that runs, is silence. No sandoq, or one
+under 0.4.28, is exit 0 and silence. The pane's own `/sandoq open` writes no folder entry, so the
+hook stays silent in the desktop app; the pane opened in a folder that sandoq seats says one line
+and opens no second wake. The rules of the seat are the skill `sandoq-seat`, not the commands. The
+seat's say is a Bash command, which a session may ask about: the rule `Bash(sandoq room say:*)`
+in the project's permissions lets it run; nothing in the plugin writes settings. Not seen yet: a
+real local session with no pane that sits by `/sandoq:seat-open` and wakes on a row.
 
 A card said to a seat waits on that seat. When a card names this seat, its face shows the card
 under Waits for you: "said to you by" the seat that said it (or "you", for your own voice), its
@@ -342,7 +335,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.74 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.75 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,

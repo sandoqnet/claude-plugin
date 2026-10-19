@@ -34,7 +34,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.74'
+export const VERSION = '0.8.75'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
 export const SANDOQ_OPTION_NAME = 'sandoq'
 
@@ -195,11 +195,21 @@ export const roomAppVersionArgv = (host: Host): string[] => sandoqVersionArgv(ho
 // per session: no tap opens or shuts, and the door's binding comes in a later cut. Each argv of the seat stands ONCE here and runs from the session's
 // folder, whatever room it is in, with the sandoq program given (found as the others are).
 export const SESSION_OPEN_FROM = '0.4.22'
+// THE SEAT WITH NO PANE: from sandoq SEAT_FOLDER_FROM the program keeps the seat of a folder and does the wake (`room seat`, `room seat off`, `room wake --hook`);
+// the plugin keeps no state of its own. A sandoq under it: the hook is silent and the commands say one line.
+export const SEAT_FOLDER_FROM = '0.4.28'
+// `room seat ROOM [SEAT]` sits this folder as SEAT of the joined room (SEAT left out: the seat of the room's member file); `room seat off` drops it; `room seat`
+// alone says it. They run from the session's folder, which is the folder sandoq keys the state by.
+export const folderSeatArgv = (sandoq: string, room: string, seat = ''): string[] => [sandoq, ROOM_NOUN, 'seat', room, ...(seat === '' ? [] : [seat])]
+export const folderSeatOffArgv = (sandoq: string): string[] => [sandoq, ROOM_NOUN, 'seat', 'off']
+export const folderSeatShowArgv = (sandoq: string): string[] => [sandoq, ROOM_NOUN, 'seat']
+// The hook: the hook's JSON on its input; no entry for the folder is silence, rows are the turn on the err with exit 2.
+export const folderWakeHookArgv = (sandoq: string): string[] => [sandoq, ROOM_NOUN, 'wake', '--hook']
 const SEAT_SESSION_FLAG = '--session'
 // The wake: `room wake ROOM --next --seat SEAT --json` passes until a pass holds a row of SEAT, prints that pass's rows of SEAT, one json object a line
 // ({r, seat, seq, line}), and exits 0. It is the pane's own process (spawned, never a Bash call of Claude) and has no limit: it ends with rows, or when
 // shut stops it.
-export const seatWakeArgv = (sandoq: string, room: string, seat: string): string[] => [sandoq, ROOM_NOUN, 'wake', room, '--next', '--seat', seat, JSON_WORD]
+export const seatWakeArgv =(sandoq: string, room: string, seat: string): string[] => [sandoq, ROOM_NOUN, 'wake', room, '--next', '--seat', seat, JSON_WORD]
 // One pass, no wait: every new row of the order as json, the same lines (room_rows, and the rows that waited at open). It shares the mark of the wake.
 export const seatRowsArgv = (sandoq: string, room: string): string[] => [sandoq, ROOM_NOUN, 'wake', room, '--once', JSON_WORD]
 // The seat's answer: `room say --room ROOM [--session ID] TEXT`, from any folder. The text is one word of the argv. It has no --re: the holder's bridge answers

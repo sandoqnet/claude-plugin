@@ -36,6 +36,7 @@ import {
   roomAppVersionArgv,
   roomFileArgv,
   roomFilesArgv,
+  roomNudgeArgv,
   roomOpenArgv,
   roomOpenWhy,
   roomPagePath,
@@ -65,6 +66,7 @@ import {
   writeText,
   backgroundPath,
   barCardArgv,
+  chatArgv,
   localAboutArgv,
   localFeedArgv,
   localReplyArgv,
@@ -86,16 +88,19 @@ import {
   tapArgv,
   themesPath,
   tickPath,
+  worldNudgeArgv,
   worldPostArgv,
 } from './host'
 import { bareIdFrom, cardIdFrom, feedWord, foldersUp, isBridgeOff, relativeTo } from './bridge'
 import type { Env } from './bridge'
 import type { FileCache, FileEntry, Host, Io, OwnCard, RoomKind } from './host'
+import { midEdit } from './midsay'
 import { BACKGROUND_MOST, backgroundKey, backgroundLine, backgroundOf, bytesOfText, keptFor } from './model/background'
 import type { Background, KeptBackground } from './model/background'
 import { TOAST_COLS, bellLine, fit, freshRings, keeperRing } from './model/bell'
 import type { Ring } from './model/bell'
 import { preview, stripUlid } from './model/blocks'
+import { CHAT_NO_CARD, CHAT_USAGE, chatCommandOf, chatLongWords, chatTooLong, chatWords, keptTap } from './model/chat'
 import { DESK_PILE, FROM_DESK, isDeskId, noDeskVerb, originOf, parseDeskList } from './model/desk'
 import type { DeskCard, DeskItem } from './model/desk'
 import { leaveCard, openMore, toggleMore } from './model/expanded'
@@ -112,9 +117,13 @@ import type { PendingTap } from './model/motion'
 import { pagesKept } from './model/pages'
 import { PAGE_MOST, PAGE_NO_FOLDER, PAGE_OTHER, PAGE_TOO_BIG, pageEmpty, pageFailed, pageKindOf, pageLine, pageMedia, pageMissing, pagePathOf } from './model/page'
 import type { PageRead } from './model/page'
+import { addKeys, keyLineSet, readKeys } from './model/keys'
+import type { KeysCard, KeysRead } from './model/keys'
+import { NUDGE_EVERY, NUDGE_FIRST, nudgeShown, nudgeWhy, parseNudge } from './model/nudge'
+import type { NudgeCard, NudgeRead } from './model/nudge'
 import { lastLineOf, parseSecretList } from './model/secrets'
 import type { SecretRow, SecretsCard } from './model/secrets'
-import { freshFeed, parseFeed, whereWords } from './model/roomfeed'
+import { freshFeed, parseFeed, shapeAsks, whereWords } from './model/roomfeed'
 import type { FeedEntry } from './model/roomfeed'
 import { discsOf, doorOf, programsOf, sizeOf } from './model/roomplace'
 import { DOOR_NOT_READ, DOOR_REFUSED, DOOR_UNKNOWN, ROOM_NOT_READ, ROOM_REFUSED, ROOM_TOO_OLD, ROOM_UNKNOWN, roomNameOf, roomStartOf, whereOf } from './model/roomstart'
@@ -125,7 +134,9 @@ import {
   OPEN_USAGE,
   RE_REFUSED,
   SEAT_WORD,
+  WAIT_LINE,
   badRowLine,
+  kitHolds,
   lastSeq,
   openLine,
   openToast,
@@ -155,7 +166,7 @@ import type { SeatList, ShelfFilesRead } from './model/shelffiles'
 import { newestRecord, parseSeen, seenText, shelfSeenPath, themesOf, toldOf, whoseOf } from './model/shelfreads'
 import type { SeatShelf } from './model/shelfreads'
 import { groundsOf, hourFor, paneRows } from './model/scene'
-import { afterLine, checkedSteps, doorNotUp, doorOfCheck, isNoClaude, paneStepOf, readSteps, stepLines, waits, withoutProgress, wordOf as stateWord } from './model/steps'
+import { afterLine, checkedSteps, doorNotUp, doorOfCheck, isNoClaude, isPaneRestart, paneStepOf, readSteps, stepLines, waits, withoutProgress, wordOf as stateWord } from './model/steps'
 import type { Door, Step } from './model/steps'
 import { DEFAULT_FACE, FACES, INDENT, openAsks, parseWalk, waitingLine } from './model/walk'
 import { DOOR_LATE, NO_CARD_LINE, candidatesOf, cardAtPlace, idOfSay, keepSaid, lineOf, newestIdOf, sessionIdsOf, withoutSlashWords, writeLineOf, yourCardsOf } from './model/yourcards'
@@ -171,6 +182,8 @@ import type { DockSlot } from './model/dock'
 import { DOOR_READING, canvasRowsOf, dockPlaceOf, dockPress, forgetTiles, terminalRowsOf, terminalSize } from './views/frame'
 import { pressedRegion } from './views/press'
 import { forgetPictures } from './views/ur'
+import { CHAT_LIST } from './views/chat'
+import { TERMINAL_LIST } from './views/termpage'
 import { DESK_LIST, forgetDeskPicture } from './views/desk'
 import { LETTER_TEXT } from './views/seat'
 import { WALK_LIST, WALK_OPEN } from './views/walk'
@@ -263,8 +276,12 @@ let pages: Record<string, number> = {}
 let seatTo = ''
 // Where a say goes when the open card has no open ask: the room, or a reply to the card `targetFor`, the
 // one open when the person picked it. Another open card, or a send, puts it back to the room.
-let target: 'room' | 'card' = 'room'
+// On a letter opened from the desk the target is the room or the keeper on that card (order keeper chat), `targetFor` its id.
+let target: 'room' | 'card' | 'keeper' = 'room'
 let targetFor = ''
+// The words he sent to the keeper on a card that the walk does not hold yet, by the card's id: each is drawn as his line with Sent. under it until the walk
+// holds a line of those words (model/chat.ts). In memory only.
+let chatSent: Record<string, string[]> = {}
 // How many of the newest cards the feed reads; "older" adds SHOWN_CARDS.
 let shown = SHOWN_CARDS
 // What "Show N more" and "N more ›" of the operator lens have opened, by the card the lens has open ('' for
@@ -306,6 +323,8 @@ let roomOpen = ''
 // The nav the open place was opened from, only when that was the room card (order DP, P4): the Back of Seats, the Shelf and Versions says
 // `‹ The room` then. Forgotten when he opens a place from anywhere else.
 let came: Nav | undefined
+// The surface the session started on, as its start said it: only the terminal asks for the keyboard when the pane opens (openPane).
+let startedOn = ''
 // What a seat drives and reads (order A-M12), in memory alone. The tree of the last draw, with the surface, the columns of
 // the pane and the rows it was drawn at; the width the pane is laid out at (0 is the real width, set by the tool
 // room_pane_do and back to 0 at each opening); the theme the seat asked for and the theme the kit says.
@@ -370,6 +389,8 @@ const itemSeen = new Set<string>()
 let deskSeeded = false
 let bell: Ring[] = []
 const tapped = new Set<string>()
+// The keeper's shape asks he tapped (their ids): the ask is one tap, so its Yes and No are held from the tap until the feed is read with the decided block. In memory only.
+const shapeSent = new Set<string>()
 // The reads of the room that have not reached their ring: the bell does not ring while one is out, so one read gives one toast (order T2B).
 const holding = new Set<object>()
 // The keeper's picks he took off his desk by OK (order T3), by the key of the pick (model/keeperrow.ts), with the room folder they were read for. They
@@ -420,6 +441,8 @@ const FIND_HOLD = 15
 const READING = 'reading the room'
 const READING_LINE = 'Reading the room…'
 const NOT_SENT = 'It is NOT sent as far as the pane knows: look at the room before you send it again.'
+// A line to the keeper needs the program `chat` of a room found by its mark, which sandoq runs by its bare name.
+const NO_CHAT = 'a line to the keeper needs a room found by its mark: run sandoq room new in this folder. Nothing was sent.'
 // A seat's name as an at word may carry it: letters, digits, dashes, dots and underscores.
 const SAY_NAME = /^[\w.-]+$/
 // What the pane says of a card id that holds a sign the room does not read in an id: it sends nothing.
@@ -716,7 +739,7 @@ async function runCheck($, name: string, argv: string[]): Promise<Checked> {
 // lines of a check that did not answer. What a press of an update gave stands in `ran`, what runs in `running`, and the fold is where he
 // left it. Like the check's, all of it is the memory of the session.
 let table: { steps: Step[]; door: Door; older: boolean; notes: string[] } = { steps: [], door: 'none', older: false, notes: [] }
-let ran: { refused?: { code: number; err: string }; said?: { plain: string; lines: string[] }; notes: string[]; doorNotUp: boolean; older?: boolean } = { notes: [], doorNotUp: false }
+let ran: { refused?: { code: number; err: string }; said?: { plain: string; lines: string[]; pane?: Step }; notes: string[]; doorNotUp: boolean; older?: boolean } = { notes: [], doorNotUp: false }
 let running: { what: string; restart: boolean } | undefined
 let tablePage = 0
 let tableFold = false
@@ -778,10 +801,11 @@ async function runUpdate($): Promise<UpdateResult> {
   const name = 'sandoq pane update'
   try {
     const run = await spawnWithin($, updatePaneArgv(host), LIMIT.update, name)
-    const said = streamLines(stepLines(run.stdout ?? '').join('\n'))
+    const code = run.exitCode
+    // After exit 0 the pane's step that waits for a new session is said by the card in its own words (views/versions.tsx), not by its line.
+    const said = streamLines(stepLines(run.stdout ?? '', code === 0 ? isPaneRestart : undefined).join('\n'))
     const rest = said.length - MAX_CHECK_LINES
     const lines = rest > 0 ? [...said.slice(0, MAX_CHECK_LINES), `…and ${rest} more lines`] : said
-    const code = run.exitCode
     if (code === undefined && said.length === 0) {
       const after = (await runCheck($, 'sandoq update --check', updateCheckArgv(host))).result
       return { state: 'done', lines: after.lines.length > 0 ? after.lines : [after.head !== '' ? after.head : after.plain].filter(line => line !== ''), plain: UPDATE_UNREAD }
@@ -790,7 +814,8 @@ async function runUpdate($): Promise<UpdateResult> {
     // loaded nothing. A sandoq that printed no json form has no step to read, and its exit 0 says it as it did.
     if (code === 0) {
       const read = readSteps(run.stdout ?? '')
-      return { state: 'done', lines, plain: read.steps.length === 0 ? UPDATE_DONE : afterLine(read.steps) }
+      const restart = read.steps.find(isPaneRestart)
+      return { state: 'done', lines, plain: read.steps.length === 0 ? UPDATE_DONE : afterLine(read.steps), ...(restart === undefined ? {} : { pane: restart }) }
     }
     if (said.length > 0) return { state: 'done', lines, plain: `It exited ${code ?? 'with no code'}. See the lines.` }
     const refusal = streamLines(withoutProgress(run.stderr)).at(-1) ?? `it exited ${code ?? 'with no code'}`
@@ -1003,7 +1028,9 @@ async function pressUpdate($, press: Press): Promise<void> {
         notes: typeof code === 'number' ? [] : ['It exited with no code. See the lines.'],
         doorNotUp: doorNotUp(read.steps),
         ...(typeof code === 'number' && code !== 0 ? { refused: { code, err: last } } : {}),
-        said: { plain: afterLine(read.steps), lines },
+        // The pane's step that waits for a new session after exit 0 is what the table says under the pane's entry (the check that follows
+        // does not give it back), as its call to action.
+        said: { plain: afterLine(read.steps), lines, ...(code === 0 && read.steps.some(isPaneRestart) ? { pane: read.steps.find(isPaneRestart)! } : {}) },
       }
       update = { state: 'rest', lines: [], plain: '' }
     }
@@ -1085,6 +1112,169 @@ async function readSecrets($): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
+// THE KEYS (order keys): ctrl+x then d, o, s, b or n, bound in the Chat block of his keybindings.json to the five commands of the pane. The file is read
+// when the pane opens (the session start and /sandoq) and when the Keys section opens, never on a timer and never at a draw; it is WRITTEN only by the tap
+// on "Add them to your keys" (his dotfile: his tap is his word), and only the lines no Chat block holds, never over a key bound to another thing. A file
+// the pane cannot read or that is no keybindings is one line, and nothing is written.
+let keysRead: KeysRead | undefined
+let keysLine = ''
+const keysCardNow = (): KeysCard => ({ read: keysRead, line: keysLine })
+const BROKEN_KEYS: KeysRead = { file: 'broken', set: [], missing: [], clash: [] }
+
+// The path of his file: the folder named by CLAUDE_CONFIG_DIR, else `.claude` under his home; '' when neither is known.
+function keybindingsPath(): string {
+  const env = envOf()
+  const folder = env.CLAUDE_CONFIG_DIR ?? (env.HOME === undefined || env.HOME === '' ? '' : `${env.HOME.replace(/\/+$/, '')}/.claude`)
+  return folder === '' ? '' : `${folder.replace(/\/+$/, '')}/keybindings.json`
+}
+
+// The file read once: its text (undefined when the file is none), or 'cannot' when it stands and could not be read. A file that is not there is
+// none, never a thing to write over a file that is.
+async function keysTextOf($): Promise<string | undefined | 'cannot'> {
+  const path = keybindingsPath()
+  if (path === '') return 'cannot'
+  try {
+    if (!(await $.fs.exists(path))) return undefined
+    return String(await $.fs.read(path))
+  } catch {
+    return 'cannot'
+  }
+}
+
+async function readKeysFile($): Promise<void> {
+  const text = await keysTextOf($)
+  keysRead = text === 'cannot' ? BROKEN_KEYS : readKeys(text)
+}
+
+// "Add them to your keys": the file is read again, the lines it lacks are added to its Chat block and written back, once, and the card says how many.
+// A file that cannot be read, or whose text the add would not make whole, is one line and no write. The pane draws what it holds after it.
+async function addKeysFile($): Promise<void> {
+  keysLine = ''
+  try {
+    const text = await within($, LIMIT.send, 'keybindings.json', keysTextOf($))
+    const made = text === 'cannot' ? undefined : addKeys(text)
+    if (text === 'cannot' || made === undefined) {
+      keysRead = BROKEN_KEYS
+      keysLine = 'keybindings.json could not be read as keybindings: nothing was written.'
+    } else if (made.added.length === 0) {
+      keysRead = readKeys(made.text)
+      keysLine = 'Nothing to add: no key is missing.'
+    } else {
+      await within($, LIMIT.send, 'keybindings.json', Promise.resolve($.fs.write(keybindingsPath(), made.text)))
+      keysRead = readKeys(made.text)
+      keysLine = `Added ${made.added.length} ${made.added.length === 1 ? 'line' : 'lines'} to the Chat block of keybindings.json.`
+    }
+  } catch (error) {
+    keysLine = isUnanswered(error) ? `${error.message}; the pane cannot say it was written.` : `keybindings.json was not written: ${scrub(String(error)).slice(0, 120)}`
+  }
+  $.ui.invalidate('ui.render')
+}
+
+// The five commands: each opens its place as the key line Button does and brings the pane up. They are immediate: a key bound to one runs from the
+// prompt, even while the session works.
+async function doKey($, place: 'desk' | 'door' | 'shelf' | 'back'): Promise<string> {
+  const actions = actionsOf($)
+  if (place === 'back') await actions.backToSeat?.()
+  else await actions.open(place === 'desk' ? { view: 'desk' } : place === 'door' ? { view: 'room' } : { view: 'shelf', by: 'kind' })
+  await $.ui.open({ id: PANE, title: 'Room' })
+  return `Room pane: ${place}.`
+}
+
+// NUDGE (order nudge pane): the seat of this pane is woken at an interval by the verb of the world (`salam/cli.py nudge`) or of the room (`sandoq room nudge`);
+// the schedule is kept on the disc. The pane holds NO timer and NO clock for it: the state is read on open (the session start, /sandoq and the Nudge
+// section), after a press of its own, and at a wake (the turn of the seat ends), never on a timer and never at a draw. A read that fails leaves the
+// last state and says nothing; a press that fails shows the verb's line whole (a toast and the Settings line) and changes nothing.
+let nudgeRead: NudgeRead | undefined
+let nudgePicked = NUDGE_FIRST
+let nudgeLine = ''
+let nudgeOlder = false
+let nudgeBusy = false
+let nudgeRun = 0
+// The argv of the verb for this pane's mode and seat; none where no road stands (no seat, no room, a room.sh room, no sandoq).
+const nudgeArgvOf = (change?: string): string[] | undefined =>
+  host.mode === 'world' ? worldNudgeArgv(host.cliPy, seatNow(), change) : host.mode === 'room' ? roomNudgeArgv(host, seatNow(), change) : undefined
+const nudgeCardNow = (): NudgeCard => ({ seat: seatNow(), can: nudgeArgvOf() !== undefined, read: nudgeRead, picked: nudgePicked, line: nudgeLine, older: nudgeOlder, busy: nudgeBusy })
+const forgetNudge = (): void => {
+  nudgeRead = undefined
+  nudgePicked = NUDGE_FIRST
+  nudgeLine = ''
+  nudgeOlder = false
+  nudgeBusy = false
+  nudgeRun += 1
+}
+
+// One call of the verb: an interval or `off` is a press, none is a read. A read whose press came after it is dropped.
+async function callNudge($, change?: string): Promise<void> {
+  const argv = nudgeArgvOf(change)
+  if (argv === undefined) return
+  const press = change !== undefined
+  const run = press ? (nudgeRun += 1) : nudgeRun
+  if (press) {
+    nudgeBusy = true
+    $.ui.invalidate('ui.render')
+  }
+  let read: NudgeRead | undefined
+  let line = ''
+  let older = false
+  try {
+    const got = await runWithin($, argv, press ? LIMIT.send : LIMIT.poll, 'the nudge')
+    if (got.exitCode === 0) {
+      read = parseNudge(String(got.stdout ?? ''))
+      if (read === undefined) line = 'The pane could not read the state nudge gave.'
+    } else {
+      const why = nudgeWhy(got.exitCode, String(got.stderr ?? ''))
+      line = scrub(why.line)
+      older = why.older
+    }
+  } catch (error) {
+    line = isUnanswered(error) ? 'nudge did not answer in time; the state is as it was.' : 'nudge did not run.'
+  }
+  if (run !== nudgeRun) return
+  if (press) nudgeBusy = false
+  if (read !== undefined) {
+    nudgeRead = read
+    nudgeOlder = false
+    nudgeLine = ''
+    if (NUDGE_EVERY.includes(read.every)) nudgePicked = read.every
+  } else {
+    nudgeOlder = older
+    if (press) {
+      nudgeLine = line
+      $.ui.toast(line, { timeoutMs: 15000 })
+    }
+  }
+  $.ui.invalidate('ui.render')
+}
+
+const readNudge = ($): Promise<void> => callNudge($)
+
+// The toggle (the bar's Button, the key n, ctrl+x n): on at the picked interval, or off. A press of an interval in Settings sets it again while on, and
+// picks it for the next turn on while off. A call out holds the next press.
+async function pressNudge($, every?: string): Promise<void> {
+  const card = nudgeCardNow()
+  if (!nudgeShown(card) || nudgeBusy) return
+  if (every !== undefined) {
+    if (!NUDGE_EVERY.includes(every)) return
+    nudgePicked = every
+    if (card.read?.on !== true) {
+      $.ui.invalidate('ui.render')
+      return
+    }
+    return callNudge($, every)
+  }
+  return callNudge($, card.read?.on === true ? 'off' : card.picked)
+}
+
+// ctrl+x n: the same toggle from the prompt, and the line that says what it did.
+async function doNudge($): Promise<string> {
+  const card = nudgeCardNow()
+  if (card.seat === '') return 'Nudge needs a seat: this pane has none.'
+  if (!card.can) return 'Nudge has no road here: no room with a sandoq, and no world, was found.'
+  await pressNudge($)
+  const now = nudgeCardNow()
+  return now.line !== '' ? now.line : now.read?.on === true ? `Nudge on, every ${now.read.every}.` : 'Nudge off.'
+}
+
 // A press on a name: its line shows under the row, or hides when it shows. A name the list does not hold shows nothing.
 function showSecret($, name: string): void {
   secrets = secrets.open === name || !secrets.rows.some(row => row.name === name) ? { ...secrets, open: '' } : { ...secrets, open: name }
@@ -1120,6 +1310,10 @@ const forgetDesk = (): void => {
   // A new session reads what he took off by OK from the pane's own file again.
   keeperOk = new Set<string>()
   keeperOkRoot = undefined
+  shapeSent.clear()
+  // And the words he sent to the keeper that the walk did not hold yet, and the target that was the keeper's.
+  chatSent = {}
+  if (target === 'keeper') target = 'room'
   // And the time he has seen on the Shelf from its file: a new session reads the room as its first, which only seeds.
   shelfSeen = undefined
   shelfSeenRoot = undefined
@@ -1784,7 +1978,9 @@ function drawnOf(next: Snapshot, now: number): unknown {
           feed: (feed ?? []).map(entry => `${entry.id}:${whereWords(entry)}`),
         }
   if (room?.door.usdToday !== undefined) room.door.usdToday = Math.round(room.door.usdToday * 100) / 100
-  return { ...rest, walks: walks.map(walk => `${walk.id}:${walk.text.length}`), background: backgroundKey(background), room }
+  // the desk draws a row for each open shape ask and the gate view its decided block, whatever place is open
+  const shapes = shapeAsks(feed).map(ask => `${ask.id}:${ask.decided?.choice ?? ''}`)
+  return { ...rest, walks: walks.map(walk => `${walk.id}:${walk.text.length}`), background: backgroundKey(background), room, shapes }
 }
 
 // Redraw only when what is drawn changed. What asks the host to draw the pane while nobody acts is this poll alone (a
@@ -2155,7 +2351,67 @@ const openedId = (): string =>
 const lensOpenId = (): string => (nav.view === 'feed' && snap.cards.some(card => card.id === nav.cardId) ? nav.cardId : '')
 
 // The target the bar draws: the card only while it is still the card the person picked it for.
-const targetNow = (): 'room' | 'card' => (target === 'card' && targetFor === openedId() ? 'card' : 'room')
+const targetNow = (): 'room' | 'card' | 'keeper' =>
+  target === 'card' && targetFor === openedId() ? 'card' : target === 'keeper' && targetFor === letterCardId() ? 'keeper' : 'room'
+
+// The card of the letter open from the desk (order keeper chat), '' off a letter of the desk and for a shape ask, which lies on no card.
+const letterCardId = (): string =>
+  nav.view === 'wait' && nav.from === FROM_DESK && nav.cardId !== nav.askId && snap.walks.some(walk => walk.id === nav.cardId) ? nav.cardId : ''
+
+// His line to the keeper on a card (order keeper chat): `sandoq room run chat GATE .CARD`, the words on its input. Over CHAT_LIMIT characters nothing is sent.
+// Exit 0: sent, and the words stand as his line with Sent. under it until the walk holds them. Exit 1 and one line on stderr: that line whole. A refused ring with
+// the tap kept (keptTap) is a line that was sent: it stands as his line with Sent. as well, and the walk is read again. Any other line (no card, no words) wrote
+// nothing, and nothing is drawn. The answer is the one line to say ('' for none) and whether the line was sent; the bar toasts it, /sandoq chat says it in the chat.
+async function chatRun($, cardId: string, text: string): Promise<{ sent: boolean; line: string }> {
+  const words = chatWords(text)
+  if (words === '') return { sent: false, line: '' }
+  if (chatTooLong(words)) return { sent: false, line: `room: ${chatLongWords(words)}` }
+  host = await detectMode(ioOf($))
+  if (cannotSend()) return { sent: false, line: `room: ${noSendWords()}` }
+  if (host.marked !== true) return { sent: false, line: `room: ${NO_CHAT}` }
+  let run: { exitCode?: number; stdout?: string; stderr?: string }
+  try {
+    run = await runWithin($, chatArgv(host, cardId, words), LIMIT.send, 'the line to the keeper')
+  } catch (error) {
+    return { sent: false, line: isUnanswered(error) ? `room: ${error.message}\n${NOT_SENT}` : `room: post failed: ${scrub(String(error)).slice(0, 160)}\nNothing was sent.` }
+  }
+  // Exit 0 sent the line. Exit 1 with a refused ring left the tap in the inbox: the line was sent too, drawn with the room's line. Any other exit wrote nothing.
+  let kept = run.exitCode === 0
+  let line = ''
+  if (run.exitCode !== 0) {
+    const lines = withoutProgress(run.stderr).trim().split('\n').map(scrub)
+    const said = (lines.pop() ?? '').trim() || `sandoq exited ${run.exitCode}`
+    line = `The room says: ${said}`
+    kept = run.exitCode === 1 && keptTap(said)
+  }
+  if (kept) {
+    chatSent = { ...chatSent, [cardId]: [...(chatSent[cardId] ?? []), words] }
+    // the thread opens on its newest page again, in its own pager and in the terminal's
+    const { [CHAT_LIST]: _page, [TERMINAL_LIST]: _terminal, ...rest } = pages
+    pages = rest
+  }
+  $.ui.invalidate('ui.render')
+  await poll($)
+  return { sent: kept, line }
+}
+
+// The bar's send: the room's line, when there is one, is a toast.
+async function chatCard($, cardId: string, text: string) {
+  const done = await chatRun($, cardId, text)
+  if (done.line !== '') $.ui.toast(done.line, { timeoutMs: 15000 })
+}
+
+// `/sandoq chat WORDS` (the app draws no bar): WORDS go by the road of the bar to the keeper on the card the pane has open from the desk, and the pane is not
+// opened. With no card open, or no words, one line says so and nothing is sent; the same over CHAT_LIMIT characters. The answer in the chat is the say's own line,
+// as an at say's is.
+async function doChatSay($, words: string): Promise<string> {
+  if (words === '') return CHAT_USAGE
+  const cardId = letterCardId()
+  if (cardId === '') return CHAT_NO_CARD
+  const done = await chatRun($, cardId, words)
+  if (!done.sent) return /nothing was sent|NOT sent/i.test(done.line) ? done.line : `${done.line}\nNothing was sent.`
+  return `room: sent to the keeper: ${preview(words)}${done.line === '' ? '' : `\n${done.line}`}`
+}
 
 // One program of the room by process.run: what it printed, and on a failure its last line said (the line
 // of card.py's refusal), else its exit code.
@@ -2285,11 +2541,56 @@ async function doWordsSay($, words: string): Promise<string> {
   return line
 }
 
+// The middle part as HIS card, by the road of the bar's say in a marked room (barCardArgv, as sendBarCard runs it): exit 0 is a card sent, exit 1
+// with an id on the out is a card that stands whose ring failed (sent, the room's own line), any other exit made no card. The target and the
+// feed are left alone: his message goes on to the session.
+async function midCard($, said: string): Promise<{ sent: boolean; line: string }> {
+  let run: { exitCode?: number; stdout?: string; stderr?: string }
+  try {
+    run = await runWithin($, barCardArgv(host, said), LIMIT.send, 'the card to the room')
+  } catch (error) {
+    const line = isUnanswered(error) ? `room: ${error.message}\n${NOT_SENT}` : `room: post failed: ${scrub(String(error)).slice(0, 160)}\nNothing was sent.`
+    return { sent: false, line }
+  }
+  if (run.exitCode === 0) {
+    await poll($)
+    return { sent: true, line: `room: sent a card: ${preview(said)}` }
+  }
+  const lines = withoutProgress(run.stderr).trim().split('\n').map(scrub)
+  const line = (lines.pop() ?? '').trim() || scrub(`${run.stdout ?? ''}`.trim().split('\n').pop() ?? '') || `sandoq exited ${run.exitCode}`
+  const made = bareIdFrom(`${run.stdout ?? ''}`) !== ''
+  if (made) await poll($)
+  return { sent: made, line: `The room says: ${line}${made ? '' : '\nNothing was sent.'}` }
+}
+
+// The /sandoq part in the middle of his message (hooks/midsay.ts): in a marked room the words are HIS card (midCard); an at name first is a say to that
+// seat by the road of the command (doAtSay); elsewhere the session's say (doSay). The pane does not open, and the line is toasted whether it went or
+// not, so no refusal is silent. A room that cannot be written to is said by the one toast of this function alone.
+async function sendMid($, part: string): Promise<{ sent: boolean; line: string }> {
+  const words = withoutSlashWords(part)
+  host = await detectMode(ioOf($))
+  let result: { sent: boolean; line: string }
+  if (cannotSend()) result = { sent: false, line: `room: ${noSendWords()}` }
+  else if (words.startsWith('@')) {
+    const line = await doAtSay($, words)
+    result = { sent: line.startsWith('room: sent a card') || line === `room: ${DOOR_LATE}`, line }
+  } else if (host.marked === true && words.trim() !== '') result = await midCard($, words.trim())
+  else {
+    const line = await doSay($, words)
+    result = { sent: line.startsWith('room: sent a card') || line === `room: ${DOOR_LATE}`, line }
+  }
+  if (result.sent) $.ui.toast(result.line)
+  else $.ui.toast(result.line, { timeoutMs: 15000 })
+  return result
+}
+
 // A SESSION AS THE SEAT OF A JOINED ROOM (order session open): `/sandoq open ROOM SEAT` and `/sandoq shut`. Tonight the open state is the pane's own, per
 // session (the room, the seat and the wake process, in memory): no tap opens or shuts. OPEN, in order: the state kept; the rows that waited, read once (a refusal
 // is sandoq's line, shown whole, the state dropped and nothing else started); the wake; the context on; the card. The wake is the pane's own process,
-// `sandoq room wake ROOM --next --seat SEAT --json` (never a Bash call of Claude): on its exit 0 with rows ONE $.prompt.submit makes them a turn, and when it is
-// taken --next starts again. A refused submit is said on the card and keeps the rows for the next one. There is no clock, no poll and no timer here: the pass of
+// `sandoq room wake ROOM --next --seat SEAT --json` (never a Bash call of Claude): on its exit 0 with rows the pane holds them, and ONE $.prompt.submit makes them a
+// turn; --next starts again at once. The kit refuses a submit from the hook of a command, so the wake and its submit run in the session.start hook's own loop (below):
+// it outlives that hook, waits on a promise the open resolves with the seat (never a `$`), and submits while the session is idle. A turn's end (turn.complete) hands what a
+// busy session refused. A refused submit is said on the card and keeps the rows for the next one. There is no clock, no poll and no timer here: the pass of
 // 5 s is inside sandoq. SHUT, in order: the wake stopped; the state dropped; the context off; the card as before. It only unties this session: never `room leave`.
 type SeatOpen = {
   room: string
@@ -2305,6 +2606,28 @@ type SeatOpen = {
 }
 let seatOpen: SeatOpen | undefined
 let seatOpening: Promise<string> | undefined
+
+// What the session.start loop waits on: the open resolves it with the seat (the room, the seat, its held rows; no `$`), a shut or an end with none. A promise that is
+// resolved is never resolved again: the next word makes a fresh one, so a shut and an open in a row each reach the loop. `seatLoopRun` ends the loop of an earlier start.
+type SeatWait = { promise: Promise<SeatOpen | undefined>; settle: (seat: SeatOpen | undefined) => void; told: boolean }
+function newSeatWait(): SeatWait {
+  let settle: SeatWait['settle'] = () => undefined
+  const promise = new Promise<SeatOpen | undefined>(done => {
+    settle = done
+  })
+  return { promise, settle, told: false }
+}
+let seatWait = newSeatWait()
+let seatLoopRun = 0
+function tellLoop(seat: SeatOpen | undefined): void {
+  // a shut after a shut says nothing new; an open after any word is a promise of its own
+  if (seatWait.told) {
+    if (seat === undefined) return
+    seatWait = newSeatWait()
+  }
+  seatWait.told = true
+  seatWait.settle(seat)
+}
 
 // The kit's prompt.context is read again when the seat opens or shuts.
 function refreshSeat($): void {
@@ -2351,8 +2674,9 @@ async function sandoqHasSeats($, sandoq: string): Promise<boolean> {
 }
 
 // The rows kept become ONE turn. A submit that was taken keeps nothing; one that was refused is said on the card and the rows wait for the next.
-// Only one submit goes at a time; the kit refuses a submit from a hook that holds the turn, so the rows that waited at open (made in the command's hook)
-// are tried again at the turn's end (turn.complete) when that first try was refused.
+// Only one submit goes at a time. The kit refuses a submit from a hook that holds the turn, and the `$` of the command's hook holds it for good (the kit's scan
+// refuses a module that keeps a `$` past its hook, so none is kept). The submit is made by the `$` of the session.start loop, which outlives its hook and finds the
+// session idle, and by the one of turn.complete for what a busy session refused. The kit's own refusal is never the card's words: the card says the rows wait for the next turn.
 let seatSubmitting = false
 async function submitHeld($, seat: SeatOpen): Promise<void> {
   const rows = seat.held
@@ -2364,7 +2688,8 @@ async function submitHeld($, seat: SeatOpen): Promise<void> {
     seat.last = lastSeq(rows, seat.last)
     seat.note = ''
   } catch (error) {
-    seat.note = submitRefusedLine(scrub(String(error instanceof Error ? error.message : error)).slice(0, 160))
+    const why = scrub(String(error instanceof Error ? error.message : error)).slice(0, 160)
+    seat.note = kitHolds(why) ? WAIT_LINE : submitRefusedLine(why)
   } finally {
     seatSubmitting = false
   }
@@ -2374,7 +2699,6 @@ async function submitHeld($, seat: SeatOpen): Promise<void> {
 // The wake of one open seat. It ends when the seat is shut, or when `--next` ends with no rows or in an error (the card says so): it starts nothing again by itself.
 async function wakeLoop($, seat: SeatOpen): Promise<void> {
   for (;;) {
-    await submitHeld($, seat)
     if (seatOpen !== seat) return
     let run: { exitCode?: number; stdout?: string; stderr?: string }
     try {
@@ -2404,6 +2728,30 @@ async function wakeLoop($, seat: SeatOpen): Promise<void> {
       $.ui.invalidate('ui.render')
     }
     seat.held = [...seat.held, ...rows]
+    // The wake hands what it read at once: the session is idle, or the kit refuses and the card says the rows wait for the turn's end.
+    await submitHeld($, seat)
+    // The bad line is still said once when the submit was taken (a taken submit clears the card's note).
+    if (bad > 0 && seat.note === '' && !seat.shutting) {
+      seat.note = badRowLine(bad)
+      $.ui.invalidate('ui.render')
+    }
+  }
+}
+
+// The loop of the session.start hook: it takes each seat the open resolves, and for it hands the rows that waited, then wakes it, until the seat is shut or the wake
+// ends. Each seat's wake runs on its own, so an open after a shut never waits for the wake before to unwind. The loop waits for the next open; a later session start
+// (a new run) ends it.
+async function seatKeeper($, run: number): Promise<void> {
+  while (run === seatLoopRun) {
+    const taken = seatWait
+    const seat = await taken.promise
+    if (run !== seatLoopRun) return
+    if (seatWait === taken) seatWait = newSeatWait()
+    if (seat === undefined || seatOpen !== seat) continue
+    void (async () => {
+      await submitHeld($, seat)
+      await wakeLoop($, seat)
+    })()
   }
 }
 
@@ -2424,10 +2772,11 @@ async function doOpenSeat($, room: string, seat: string): Promise<string> {
   if (passed.failed !== '') return passed.failed
   const { rows: passedRows, bad } = parseRows(passed.out)
   const waited = rowsOfSeat(passedRows, seat)
-  const open: SeatOpen = { room, seat, sandoq, last: lastSeq(waited), held: waited, note: bad > 0 ? badRowLine(bad) : '', shutting: false, child: undefined }
+  const open: SeatOpen = { room, seat, sandoq, last: lastSeq(waited), held: waited, note: bad > 0 ? badRowLine(bad) : waited.length > 0 ? WAIT_LINE : '', shutting: false, child: undefined }
   seatOpen = open
   refreshSeat($)
-  void wakeLoop($, open)
+  // The session.start loop takes the seat from here: it hands the rows that waited and wakes it, by its own `$`.
+  tellLoop(open)
   $.ui.toast(openToast(room, waited.length))
   return openLine(seat, room)
 }
@@ -2447,6 +2796,7 @@ function shutSeat($, quiet = false): string {
   seat.shutting = true
   stopWake(seat)
   seatOpen = undefined
+  tellLoop(undefined)
   refreshSeat($)
   // The rows read but not yet told (a submit pending or refused) go with the state: the line says so, with their count.
   const lost = seat.held.length
@@ -2495,6 +2845,9 @@ const openOrSay = ($, args: unknown): Promise<string> => {
   const typed = String(args ?? '').trim()
   const words = withoutSlashWords(typed)
   if (words.startsWith('@')) return doAtSay($, words)
+  // `chat WORDS` is his line to the keeper on the card the pane has open; it opens no pane.
+  const chatWordsOf = chatCommandOf(words)
+  if (chatWordsOf !== undefined) return doChatSay($, chatWordsOf)
   // `open ROOM [SEAT]` and `shut` make this session the seat of a joined room, or end it; they say one line and open no pane.
   const seatWord = seatWordsOf(words)
   if (seatWord?.word === 'open') return openSeat($, seatWord.room, seatWord.seat)
@@ -2695,9 +3048,9 @@ function stopDoor() {
 
 // Claude's tools and the user's slash commands; one taken name must not stop the others.
 const OPEN_WORDS = 'Open the room: what waits for this seat'
-// The words after the command: `room` opens the level up; `@seat TEXT` says TEXT to that seat and opens nothing; any other TEXT
-// is said to the room and the pane opens.
-const OPEN_HINT = 'room, @SEAT TEXT, or TEXT to say'
+// The words after the command: `room` opens the level up; `@seat TEXT` says TEXT to that seat and opens nothing; `chat WORDS` says WORDS to the keeper on
+// the card open from the desk and opens nothing; any other TEXT is said to the room and the pane opens.
+const OPEN_HINT = 'room, @SEAT TEXT, chat WORDS, or TEXT to say'
 
 // /sandoq and /room open the pane on this seat's face, or as On open says; with "room" they open it one level up, on the
 // waits of each seat. Each opening starts from the face, as a session start does.
@@ -2711,6 +3064,8 @@ async function openPane($, args: string): Promise<string> {
     await within($, LIMIT.open, 'the read of the room', (async () => {
       await poll($)
       await readOwn($)
+      await readKeysFile($)
+      void readNudge($)
     })())
   } catch (error) {
     if (!noteLate(error)) throw error
@@ -2733,7 +3088,10 @@ async function openPane($, args: string): Promise<string> {
   // Each opening lays the pane out at its real width.
   laidAt = 0
   $.ui.invalidate('ui.render')
-  await $.ui.open({ id: PANE, title: 'Room' })
+  // In the terminal the pane asks for the keyboard (`focus: true`, which the kit gives every pane): the keys d, o, s and b are the pane's only while it
+  // holds the focus, and an inline pane that did not ask left them to the prompt (the lab's real capture of 0.8.66, ctrl+x Tab did not focus it). The
+  // host judges the request and refuses it while the prompt is not empty and idle; the app keeps its chat box, which has the keyboard.
+  await $.ui.open({ id: PANE, title: 'Room', ...(startedOn === 'terminal' ? { focus: true } : {}) })
   return 'Room pane opened.'
 }
 
@@ -2745,6 +3103,12 @@ async function registerExtras($) {
     { name: 'room-say', description: 'Send a card to the room', argumentHint: 'TEXT' },
     { name: 'room-tap', description: "Answer the room's open ask", argumentHint: 'CHOICE' },
     { name: 'room-new', description: 'Make a fresh local room (room.sh new; local only)' },
+    // The five keys (order keys): immediate, so a key of his keybindings.json runs one from the prompt, even while the session works, and adds no turn.
+    { name: 'room-desk', description: 'Open the room pane on your desk', immediate: true },
+    { name: 'room-door', description: 'Open the room pane on the door', immediate: true },
+    { name: 'room-shelf', description: 'Open the room pane on the shelf', immediate: true },
+    { name: 'room-back', description: 'Take the room pane back to this seat', immediate: true },
+    { name: 'room-nudge', description: "Turn this seat's Nudge on or off", immediate: true },
   ]
   for (const command of commands) {
     try {
@@ -2848,7 +3212,7 @@ function bandText(): string {
   const newest = snap.cards.find(card => card.walk.session === '')
   // What waits on HIM, counted as Desk N counts it (views/pane.tsx deskCountOf). The band said the shelf's records here, `room · 0 records`, which
   // is a count of the catalog and no part of the desk: it read 0 over a desk of 3 (the lab's real capture of 0.8.65, order mend terminal real).
-  const waits = waitsOnYouWords(deskCountOf({ walks: snap.walks, seatsText: snap.seatsText, seat: seatNow(), now: pollNow, zone: zoneOf(), entries: snap.entries, deskCard: deskCardNow(), keeperOk: [...keeperOk] }))
+  const waits = waitsOnYouWords(deskCountOf({ walks: snap.walks, seatsText: snap.seatsText, seat: seatNow(), now: pollNow, zone: zoneOf(), entries: snap.entries, deskCard: deskCardNow(), keeperOk: [...keeperOk], feed: snap.feed }))
   if (!newest) return `room · ${waits}`
   const label = labelOf(newest)
   const status = statusOf(newest, newest.walk.answered)
@@ -2899,7 +3263,12 @@ async function openNav($, nextWanted: Nav) {
   const shelfWas = windowOpen && isShelfOpen(nav)
   const deskWas = windowOpen && nav.view === 'desk'
   nav = next
-  came = was.view === 'room' && was.card === undefined && next.view !== 'room' ? was : undefined
+  // The place the Room place or Settings came from: the Room place's card (Seats, the Shelf and Versions go back to it), and in the terminal Settings
+  // goes back to the tab it was opened from, a section of it keeping that tab (views/pane.tsx terminalBackOf).
+  const isTabRoot = (place: Nav): boolean => (place.view === 'room' && place.card === undefined) || (place.view === 'desk' && place.item === undefined) || (place.view === 'shelf' && (place.of ?? '') === '')
+  if (was.view === 'room' && was.card === undefined && next.view !== 'room') came = was
+  else if (next.view === 'settings' && was.view !== 'settings' && isTabRoot(was)) came = was
+  else if (!(was.view === 'settings' && next.view === 'settings')) came = undefined
   windowOpen = true
   // Leaving the shelf closes its rest of items and the composer of a rule.
   if (next.view !== 'shelf') {
@@ -2932,6 +3301,8 @@ async function openNav($, nextWanted: Nav) {
   if (next.view !== 'room') roomOpen = ''
   // Another open card puts the target back to the room.
   if (openedId() !== before) target = 'room'
+  // The keeper's target is of one letter: another letter, or a place that is no letter of the desk, puts it back to the room.
+  if (target === 'keeper' && targetFor !== letterCardId()) target = 'room'
   // A card that closes, or another that opens, drops what "Show N more" and "N more ›" opened for the one left.
   expanded = leaveCard(expanded, lensBefore, lensOpenId())
   $.ui.invalidate('ui.render')
@@ -2954,6 +3325,15 @@ async function openNav($, nextWanted: Nav) {
   // (Settings at rest runs none: the terminal's column holds a Button that reads it).
   const inSecrets = (place: Nav): boolean => place.view === 'settings' && place.section === 'secrets'
   if (inSecrets(next) && !inSecrets(was)) void readSecrets($)
+  // The Keys section reads his keybindings.json when it opens, as the Secrets section reads its list: nothing else runs at its opening.
+  const inKeys = (place: Nav): boolean => place.view === 'settings' && place.section === 'keys'
+  if (inKeys(next) && !inKeys(was)) {
+    keysLine = ''
+    void readKeysFile($).then(() => $.ui.invalidate('ui.render'))
+  }
+  // And the Nudge section reads the state of the verb when it opens (the terminal's column, which has no section, holds the state read at the pane's opening).
+  const inNudge = (place: Nav): boolean => place.view === 'settings' && place.section === 'nudge'
+  if (inNudge(next) && !inNudge(was)) void readNudge($)
   // His desk (order DESK): the items are read when the desk opens, then by the poll.
   if (next.view === 'desk') deskAsked = true
   if (next.view === 'desk' && !deskWas) void readDesk($)
@@ -3218,6 +3598,10 @@ const actionsOf = ($): Actions => ({
   // The Secrets section (order S2): the list is read; a press on a name shows its line.
   readSecrets: () => readSecrets($),
   showSecret: name => showSecret($, name),
+  // The Keys section (order keys): his tap on "Add them to your keys" is the only call that writes his keybindings.json.
+  addKeys: () => addKeysFile($),
+  // Nudge (order nudge pane): the bar's toggle and the Every of Settings; the state is read on open, on this press and at a wake, never on a timer.
+  nudge: every => pressNudge($, every),
   // His desk (order DESK): the read, Done, and the open of an origin.
   readDesk: () => readDesk($),
   doneDesk: id => doneDesk($, id),
@@ -3292,6 +3676,21 @@ const actionsOf = ($): Actions => ({
   undoSetting: () => undoSetting($),
   say: text => sendCard($, text),
   tap: async (cardId, askId, choice) => {
+    // The keeper's shape ask is its own id for the card and the ask (the desk opens it so): ONE tap, `room tap CHOICE ASKID`, with Make or Leave. A second press, a
+    // closed ask and a word the ask does not offer send nothing, for the door writes a fault under an ask it is tapped on twice. His Yes and No stay held until the
+    // feed is read with the decided block; a tap that failed is let go.
+    const shape = cardId === askId ? shapeAsks(snap.feed).find(ask => ask.id === cardId) : undefined
+    if (shape !== undefined) {
+      if (shape.decided !== undefined || shapeSent.has(shape.id) || !shape.choices.includes(choice)) return
+      shapeSent.add(shape.id)
+      $.ui.invalidate('ui.render')
+      const sent = await tapCard($, shape.id, choice)
+      if (sent.failed !== '') {
+        shapeSent.delete(shape.id)
+        $.ui.invalidate('ui.render')
+      }
+      return
+    }
     await sendTap($, cardId, choice)
     // A letter opened from the desk goes off by its answer: where the answer left it no longer asking him, the desk stands again on its pile.
     if (nav.view !== 'wait' || nav.from !== FROM_DESK || nav.cardId !== cardId || nav.askId !== askId) return
@@ -3341,11 +3740,13 @@ const actionsOf = ($): Actions => ({
         },
         reply: (cardId: string, text: string) => sendFlagged($, (at, said) => localReplyArgv(at, cardId, said), text),
         about: (recordId: string, text: string) => sendFlagged($, (at, said) => localAboutArgv(at, recordId, said), text),
-        setTarget: (next: 'room' | 'card') => {
+        setTarget: (next: 'room' | 'card' | 'keeper') => {
           target = next
-          targetFor = openedId()
+          targetFor = next === 'keeper' ? letterCardId() : openedId()
           $.ui.invalidate('ui.render')
         },
+        // His chat with the keeper is the program `chat` of a room found by its mark alone.
+        ...(host.marked === true ? { chat: (cardId: string, words: string) => chatCard($, cardId, words) } : {}),
       }
     : {}),
 })
@@ -3581,8 +3982,9 @@ const paneOf = ($, e) => {
   kitTheme = kitThemeOf(e)
   const bodyRows = (e.props.scroll as { bodyRows?: unknown } | undefined)?.bodyRows
   const high = paneRows(e.viewport?.rows, bodyRows)
-  // The terminal's body is as high as the host says, with no floor: the small layout is a short body (views/frame.tsx).
-  const terminalRows = terminalRowsOf(e.viewport?.rows, bodyRows)
+  // The terminal's body is as high as the host says, with no floor: the small layout is a short body (views/frame.tsx). A host that tells no rows at
+  // all leaves the rows unknown, and unknown is small (0: the key line alone), never a guess of a tall body.
+  const terminalRows = terminalRowsOf(e.viewport?.rows, bodyRows) ?? 0
   // The pane opens on his desk in the app and in the wide terminal. The small terminal has no room for a place: it opens on the bar and its keys,
   // this seat's face as it opened before the desk, and takes the desk only where it was asked for (a press or the do tool opened it).
   const navShown: Nav = !isApp(e.surface) && nav.view === 'desk' && !deskAsked && terminalSize(columns ?? 80, terminalRows) === 'small' ? { view: 'seat', name: '' } : nav
@@ -3618,6 +4020,7 @@ const paneOf = ($, e) => {
     doorWord: doorWord(),
     zone: zoneOf(),
     target: targetNow(),
+    chatSent,
     settings,
     lastLine: lastChange?.line,
     lastKey: lastChange?.key,
@@ -3648,9 +4051,12 @@ const paneOf = ($, e) => {
     ...(came === undefined ? {} : { came }),
     // Versions reads the card; so does What it plays, where the acts of the discs stand (order DP, P4 part 3)
     ...(nav.view === 'settings' || (nav.view === 'room' && nav.card === 'plays') ? { versionsCard: versionsCardNow($) } : {}),
-    ...(nav.view === 'settings' ? { secretsCard: secretsCardNow() } : {}),
+    ...(nav.view === 'settings' ? { secretsCard: secretsCardNow(), keysCard: keysCardNow() } : {}),
+    keysSet: keyLineSet(keysRead),
+    nudgeCard: nudgeCardNow(),
     deskCard: deskCardNow(),
     keeperOk: [...keeperOk],
+    shapeSent: [...shapeSent],
     ...(shelfSeen === undefined ? {} : { shelfSeen }),
     windowOpen,
     pages,
@@ -3712,6 +4118,8 @@ async function firstRead($, first: Nav) {
       if (!noteLate(error)) noteRead({ part: "the pane's own file", error })
       $.ui.invalidate('ui.render')
     }
+    await readKeysFile($)
+    void readNudge($)
     if (nav === first && settings.open === 'room') {
       nav = { view: 'level' }
       windowOpen = true
@@ -3729,6 +4137,7 @@ async function firstRead($, first: Nav) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    startedOn = String(e?.surface ?? '')
     resetDrawn()
     forgetScene()
     forgetTiles()
@@ -3738,6 +4147,9 @@ export const register: Register = on => {
     drawsMade = 0
     lastDo = undefined
     laidAt = 0
+    keysRead = undefined
+    keysLine = ''
+    forgetNudge()
     yourIds = []
     saidIds = []
     yourCards = []
@@ -3794,6 +4206,11 @@ export const register: Register = on => {
     // pane started again does not rearm, /sandoq open again does (the door's binding, a later cut, will).
     if (seatOpen !== undefined) stopWake(seatOpen)
     seatOpen = undefined
+    // The loop of an earlier start ends; this start has one loop of its own, which waits for the open (the `$` of this hook is the loop's, spelled where it is used).
+    seatLoopRun += 1
+    tellLoop(undefined)
+    seatWait = newSeatWait()
+    void seatKeeper($, seatLoopRun)
     snap = emptySnap()
     backgroundKept = undefined
     wallSha = ''
@@ -3830,9 +4247,18 @@ export const register: Register = on => {
   // While the seat is open the kit adds the seat prompt to the session's context; shut, it adds nothing.
   on('prompt.context', async ($, e, next) => (seatOpen === undefined ? next(e) : { text: seatPrompt(seatOpen.room, seatOpen.seat) }))
 
-  // The rows that waited at open were made in the command's hook, which the kit does not let submit: they go at the turn's end if that try was refused.
+  // A /sandoq part in the middle of his message goes to the room as a say, and the turn reads the words before it alone (hooks/midsay.ts).
+  on('prompt.submit', async ($, e, next) => {
+    const edit = await midEdit(e, part => sendMid($, part))
+    return next(edit === undefined ? e : { ...e, ...edit })
+  })
+
+  // The rows that waited at open, and the ones the wake read since, were held: the command's hook does not let the kit submit, so they go at the turn's end, by this
+  // hook's own `$`.
   on('turn.complete', async ($, e, next) => {
     if (seatOpen !== undefined) await submitHeld($, seatOpen)
+    // The turn of a seat ends when a wake has been answered: the Nudge state is read again (a fire is a wake).
+    void readNudge($)
 
     return next(e)
   })
@@ -3870,6 +4296,17 @@ export const register: Register = on => {
   on('command.run', { command: 'room-tap' }, async ($, e) => ({ text: await doTap($, e.args, '') }))
 
   on('command.run', { command: 'room-new' }, async $ => ({ text: await doNew($) }))
+
+  // The five keys: the names stay literals here, and KEYS of model/keys.ts is held equal to them by tests/keys-wire.test.ts.
+  on('command.run', { command: 'room-desk' }, async $ => ({ text: await doKey($, 'desk') }))
+
+  on('command.run', { command: 'room-door' }, async $ => ({ text: await doKey($, 'door') }))
+
+  on('command.run', { command: 'room-shelf' }, async $ => ({ text: await doKey($, 'shelf') }))
+
+  on('command.run', { command: 'room-back' }, async $ => ({ text: await doKey($, 'back') }))
+
+  on('command.run', { command: 'room-nudge' }, async $ => ({ text: await doNudge($) }))
 
   on('command.run', { command: 'sandoq' }, async ($, e) => ({ text: await openOrSay($, e.args) }))
 

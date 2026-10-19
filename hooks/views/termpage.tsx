@@ -4,10 +4,11 @@
 // The parts that fit stand on the page asked, then ONE row of plain links as the desk's: `[ ‹ Earlier ]`, the page's words quiet, `[ N more › ]`.
 // A place whose first part is taller than the rows with the pager is none of this, and keeps its line. Pure over the kit: the rows come from
 // views/cells.ts (a Button counted as the host draws it), the pages from model/pages.ts.
-import { pageAt, pageWords } from '../model/pages'
+import { pageAt, pageWords, pagesOf } from '../model/pages'
 import type { Page } from '../model/pages'
 import { BUTTON_CELLS, kidsOf, namesOf, propsOf, sizeOf } from './cells'
 import type { Names } from './cells'
+import { CHAT_ROW } from './chat'
 import { LOOK } from './look'
 import { EARLIER, moreWords } from './pager'
 import type { Ui } from './types'
@@ -72,7 +73,11 @@ export function terminalPaged({ ui, columns, room, pages = {}, onPage }: Termina
   if (parts.length === 0) return undefined
   const heights = parts.map(part => sizeOf(part, columns, names).h)
   const pagerRows = terminalPagerRows(columns, parts.length)
-  const page = pageAt(heights, room, pages[TERMINAL_LIST] ?? 0, 0, pagerRows)
+  // A letter with his chat hands the thread's rows to this pager (order chat pager): with no page asked it opens on the page that holds the thread's newest row,
+  // and the older rows stand behind `‹ Earlier`.
+  const newest = parts.reduce((last: number, part, at) => (String(propsOf(part).key ?? '').startsWith(CHAT_ROW) ? at : last), -1)
+  const opened = newest < 0 ? 0 : Math.max(0, pagesOf(heights, room, 0, pagerRows).findIndex(([, to]) => newest < to))
+  const page = pageAt(heights, room, pages[TERMINAL_LIST] ?? opened, 0, pagerRows)
   const used = heights.slice(page.from, page.to).reduce((sum, high) => sum + high, 0) + (page.pages > 1 ? pagerRows : 0)
   if (page.to <= page.from || used > room) return undefined
   return [...parts.slice(page.from, page.to), ...terminalPagerView({ ui, list: TERMINAL_LIST, page, onPage: at => onPage(TERMINAL_LIST, at) })]

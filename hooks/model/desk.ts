@@ -3,6 +3,7 @@
 // items as given and never reads the shelf's desk.md. Run by `node` too: no enums, `import type`, `.ts` in imports.
 import type { KeeperRow } from './keeperrow.ts'
 import type { PageRead } from './page.ts'
+import type { ShapeAsk } from './roomfeed.ts'
 import type { SeatWait } from './seat.ts'
 
 const MINUTE = 60_000
@@ -34,8 +35,9 @@ export type DeskItem = {
   canDone: boolean
 }
 
-// A row of the desk: an open ask of the room, the keeper's pick of an ask of his for the day (order T3), or an item.
-export type DeskRow = { row: 'ask'; wait: SeatWait } | { row: 'pick'; pick: KeeperRow } | { row: 'item'; item: DeskItem }
+// A row of the desk: an open ask of the room, the keeper's proposal to make a shape of an entry of his (a todo), the keeper's pick of an ask of his for
+// the day (order T3), or an item.
+export type DeskRow = { row: 'ask'; wait: SeatWait } | { row: 'shape'; shape: ShapeAsk } | { row: 'pick'; pick: KeeperRow } | { row: 'item'; item: DeskItem }
 
 // What the register hands the view: the state of the read, the items it gave (open and done), the one line a call left under an item (by its
 // id) or under the head, the id of the item whose Done runs, the id of the item whose page was opened in his browser, and whether this
@@ -140,12 +142,14 @@ export function openItems(items: DeskItem[]): DeskItem[] {
 
 // The rows of ALL, the one order of the desk everywhere: his open letters first (the open asks of the room, in the order given: seat.ts gives them
 // oldest first), then the keeper's picks of the day on his asks (oldest first, as keeperRows gives them), then his open items oldest first across
-// the kinds, then the items that wait on a seat, oldest first.
-export function deskRows(waits: SeatWait[], items: DeskItem[], picks: KeeperRow[] = []): DeskRow[] {
+// the kinds, then the items that wait on a seat, oldest first. The keeper's open proposals of a shape (the fourth argument, in the order they were written)
+// stand with his letters, after the asks.
+export function deskRows(waits: SeatWait[], items: DeskItem[], picks: KeeperRow[] = [], shapes: ShapeAsk[] = []): DeskRow[] {
   const open = openItems(items)
   const item = (one: DeskItem): DeskRow => ({ row: 'item', item: one })
   return [
     ...waits.map((wait): DeskRow => ({ row: 'ask', wait })),
+    ...shapes.map((shape): DeskRow => ({ row: 'shape', shape })),
     ...picks.map((pick): DeskRow => ({ row: 'pick', pick })),
     ...open.filter(one => one.for === YOU).map(item),
     ...open.filter(one => one.for !== YOU).map(item),
@@ -161,10 +165,16 @@ export const rowKind = (row: DeskRow): string => (row.row === 'item' ? row.item.
 // Whom a row waits on: an ask waits on him, a pick is his own to see, an item on its `for`. His rows are the desk's count.
 export const isHis = (row: DeskRow): boolean => row.row !== 'item' || row.item.for === YOU
 // Who put it ('' for an ask on a card of his own, and for a pick: the row says the keeper in its words).
-export const rowBy = (row: DeskRow): string => (row.row === 'ask' ? row.wait.from : row.row === 'pick' ? '' : row.item.by)
+export const rowBy = (row: DeskRow): string => (row.row === 'ask' ? row.wait.from : row.row === 'shape' ? row.shape.by : row.row === 'pick' ? '' : row.item.by)
 // A pick lies on its ask: the ask is no open letter while it stands, so the key is the letter's own, and the ask opened from the pick is the open row.
+// A shape ask has its own id for both halves of the key: it lies on no card of the walks, and its press opens it as a wait of that id.
 export const rowKey = (row: DeskRow): string =>
-  row.row === 'item' ? `item-${row.item.id}` : `ask-${row.row === 'ask' ? `${row.wait.cardId}-${row.wait.askId}` : `${row.pick.cardId}-${row.pick.askId}`}`
+  row.row === 'item'
+    ? `item-${row.item.id}`
+    : row.row === 'shape'
+      ? shapeKey(row.shape.id)
+      : `ask-${row.row === 'ask' ? `${row.wait.cardId}-${row.wait.askId}` : `${row.pick.cardId}-${row.pick.askId}`}`
+export const shapeKey = (id: string): string => `ask-${id}-${id}`
 // The kind of origin a row opens: an ask lies on its card, and so does a pick.
 export const rowOrigin = (row: DeskRow): OriginKind => (row.row === 'item' ? row.item.opens.kind : 'card')
 // A row that has a Done: his item that is open. A letter goes off by its answer.
@@ -224,3 +234,10 @@ export const pileAt = (piles: Pile[], key: string | undefined): Pile | undefined
 const dayOf = (ms: number, zone: number): number => Math.floor((ms + zone * MINUTE) / DAY)
 export const doneToday = (items: DeskItem[], now: number, zone: number): number =>
   items.filter(item => item.done && item.doneMs > 0 && dayOf(item.doneMs, zone) === dayOf(now, zone)).length
+
+// The shape asks he closed today (a decided block stands, Make or Leave), by the same local day: they count in "Answered today" as an answer does, oldest first.
+export const shapesAnsweredToday = (asks: ShapeAsk[], now: number, zone: number): ShapeAsk[] =>
+  asks.filter(ask => {
+    const ms = timeOf(ask.decided?.at ?? '')
+    return ms > 0 && dayOf(ms, zone) === dayOf(now, zone)
+  })

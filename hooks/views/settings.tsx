@@ -1,3 +1,7 @@
+import { keysState } from '../model/keys'
+import type { KeysCard } from '../model/keys'
+import { NUDGE_EVERY, NUDGE_HEAD, NUDGE_OLDER, nudgeFired, nudgeLit, nudgeState } from '../model/nudge'
+import type { NudgeCard } from '../model/nudge'
 import type { SecretRow, SecretsCard } from '../model/secrets'
 import { CHOICES, GROUPS, groupOf, valueOfWord, wordOf } from '../model/settings'
 import type { SettingKey, Settings } from '../model/settings'
@@ -219,6 +223,163 @@ export function settingsParts({ ui, surface, width: given, plan, columns, settin
     </Box>
   )
   return { groups: byId, rules: card }
+}
+
+const KEYS_TITLE = 'Keys'
+const KEYS_NOTE = 'From the prompt: ^x then d, o, s, b or n.'
+const KEYS_ADD = 'Add them to your keys'
+const KEYS_BROKEN = 'keybindings.json cannot be read as keybindings, so nothing will be written to it.'
+
+export type KeysProps = { ui: Ui; surface?: string; width?: number; plan?: Plan; columns?: number; card: KeysCard; actions: { add: () => void } }
+
+// The Keys section (order keys): the state of the five keys (set, part set or not set), the line that says how to use them, one Button that adds the
+// missing lines to the Chat block of his keybindings.json and, under it, how many lines it writes. It writes only on his tap. A key bound to another
+// thing is named by its key and is not written. A file the pane cannot read is one line, and no Button.
+export function keysView({ ui, surface, width: given, plan, columns, card, actions }: KeysProps) {
+  const { Box, Text, Button } = ui
+  const app = isApp(surface)
+  const width = plan?.width ?? given
+  const quiet = app ? THEME.dim : LOOK.quiet
+  const { read } = card
+  const state = keysState(read)
+  const missing = read?.missing.length ?? 0
+  const body = [
+    read === undefined && (
+      <Text key="keys-unread" color={quiet}>
+        Reading…
+      </Text>
+    ),
+    read?.file === 'broken' && (
+      <Text key="keys-broken" color={quiet} wrap="wrap">
+        {KEYS_BROKEN}
+      </Text>
+    ),
+    read !== undefined && read.file !== 'broken' && missing > 0 && (app ? <Button key="keys-add" plain label={KEYS_ADD} onPress={() => actions.add()} /> : <Button key="keys-add" label={KEYS_ADD} onPress={() => actions.add()} />),
+    read !== undefined && read.file !== 'broken' && (
+      <Text key="keys-writes" color={quiet} wrap="wrap">
+        {missing > 0 ? `writes ${missing} ${missing === 1 ? 'line' : 'lines'} to the Chat block of keybindings.json` : 'all of them stand in the Chat block of keybindings.json'}
+      </Text>
+    ),
+    ...(read?.clash ?? []).map(({ row, bound }) => (
+      <Text key={`keys-clash-${row.place}`} color={quiet} wrap="wrap">
+        {`${row.key} is bound to ${bound} there: not written.`}
+      </Text>
+    )),
+    card.line !== '' && (
+      <Text key="keys-line" color={quiet} wrap="wrap">
+        {card.line}
+      </Text>
+    ),
+  ]
+  const head = (
+    <Box key="head-keys" flexDirection="row" justifyContent="space-between" columnGap={SPACE.control}>
+      <Text bold>{KEYS_TITLE}</Text>
+      {state !== '' && <Text color={quiet}>{state}</Text>}
+    </Box>
+  )
+  return app ? (
+    <Box key="settings-keys" {...cardProps(width, columns)}>
+      {head}
+      <Text color={THEME.dim} wrap="wrap">
+        {KEYS_NOTE}
+      </Text>
+      {body}
+    </Box>
+  ) : (
+    <Box key="settings-keys" flexDirection="column" {...LOOK.section}>
+      {head}
+      <Text color={LOOK.quiet}>{KEYS_NOTE}</Text>
+      {body}
+    </Box>
+  )
+}
+
+const NUDGE_RECAP = 'a recap, and a row for what is stuck'
+const NUDGE_NO_SEAT = 'Nudge wakes the seat of this pane: this pane has no seat.'
+const NUDGE_NO_ROAD = 'Nudge needs a room found with its sandoq, or the world: none stands here.'
+const NUDGE_UNREAD = 'The state is not read yet.'
+const NUDGE_CHORD = ' · ^x n turns it on or off'
+
+export type NudgeProps = {
+  ui: Ui
+  surface?: string
+  width?: number
+  plan?: Plan
+  columns?: number
+  card: NudgeCard
+  // The minutes from UTC the times are said in, and whether the five keys are set (the line then names ^x n).
+  zone?: number
+  keysSet?: boolean
+  // A press of an interval (while on it sets that one again, while off it picks it for the next turn on), and of Turn it on or Turn it off.
+  actions: { every: (every: string) => void; toggle: () => void }
+}
+
+// The Nudge section (order nudge pane), headed with the English word and the Persian one: on or off at the right; what it does (it wakes the seat at
+// the interval: a recap, and a row for what is stuck); Every, the five intervals, the lit one primary; Turn it on or Turn it off; and how many times it
+// fired and when last. The pane reads the state with its other reads, never on a timer. A sandoq without the verb, a pane with no seat and a pane with
+// no road are one line each and no Button; a refusal of the verb is its own line, whole.
+export function nudgeView({ ui, surface, width: given, plan, columns, card, zone = 0, keysSet = false, actions }: NudgeProps) {
+  const { Box, Text, Button } = ui
+  const app = isApp(surface)
+  const width = plan?.width ?? given
+  const quiet = app ? THEME.dim : LOOK.quiet
+  const { read } = card
+  const on = read?.on === true
+  const state = nudgeState(card)
+  const lit = nudgeLit(card)
+  const stands = card.seat !== '' && card.can && !card.older
+  const note = card.seat === '' ? NUDGE_NO_SEAT : !card.can ? NUDGE_NO_ROAD : card.older ? `${NUDGE_OLDER}.` : on ? `Wakes ${card.seat} every ${lit}: ${NUDGE_RECAP}.` : `Off. On, it wakes ${card.seat} every ${lit}: ${NUDGE_RECAP}.`
+  const body = [
+    stands && (
+      <Box key="nudge-every" flexDirection="row" flexWrap="wrap" columnGap={SPACE.control} alignItems="center">
+        <Text key="nudge-every-word" color={quiet}>
+          Every
+        </Text>
+        {NUDGE_EVERY.map(every => (
+          <Button key={`nudge-every-${every}`} label={every} variant={every === lit ? 'primary' : 'secondary'} dimColor={every !== lit} onPress={() => actions.every(every)} />
+        ))}
+      </Box>
+    ),
+    stands && <Button key="nudge-turn" label={on ? 'Turn it off' : 'Turn it on'} onPress={() => actions.toggle()} />,
+    stands && read === undefined && (
+      <Text key="nudge-unread" color={quiet}>
+        {NUDGE_UNREAD}
+      </Text>
+    ),
+    stands && read !== undefined && (
+      <Text key="nudge-fired" color={quiet} wrap="wrap">
+        {`${nudgeFired(read, zone)}${keysSet ? NUDGE_CHORD : ''}`}
+      </Text>
+    ),
+    card.line !== '' && (
+      <Text key="nudge-line" color={quiet} wrap="wrap">
+        {card.line}
+      </Text>
+    ),
+  ]
+  const head = (
+    <Box key="head-nudge" flexDirection="row" justifyContent="space-between" columnGap={SPACE.control}>
+      <Text bold>{NUDGE_HEAD}</Text>
+      {state !== '' && <Text color={quiet}>{state}</Text>}
+    </Box>
+  )
+  return app ? (
+    <Box key="settings-nudge" {...cardProps(width, columns)}>
+      {head}
+      <Text color={THEME.dim} wrap="wrap">
+        {note}
+      </Text>
+      {body}
+    </Box>
+  ) : (
+    <Box key="settings-nudge" flexDirection="column" {...LOOK.section}>
+      {head}
+      <Text color={LOOK.quiet} wrap="wrap">
+        {note}
+      </Text>
+      {body}
+    </Box>
+  )
 }
 
 const SECRETS_TITLE = 'Secrets'

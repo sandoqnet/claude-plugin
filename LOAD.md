@@ -1,4 +1,4 @@
-# Load room-pane 0.8.66 (checked on Claude Code v2.1.290)
+# Load room-pane 0.8.74 (checked on Claude Code v2.1.290)
 
 ## What it needs
 
@@ -28,7 +28,7 @@ X.Y.Z is the pane's version, the one `/plugin` shows after the install.
    source. Remove that marketplace: `claude plugin marketplace remove sandoq`. Then quit the
    desktop app and open it again. When `sandoq` comes from GitHub, nothing old stands: skip this
    step, and never run `claude plugin uninstall sandoq@sandoq`, for that is this pane.
-1. In a terminal run `claude plugin marketplace add sandoqnet/claude-plugin#pane-v0.8.66`. For
+1. In a terminal run `claude plugin marketplace add sandoqnet/claude-plugin#pane-v0.8.74`. For
    another release, say its tag: `pane-v` and the version.
 2. Run `claude plugin install sandoq@sandoq`. It may say that three user config options are not
    yet set. All three are optional, and each is right when left empty:
@@ -64,10 +64,10 @@ it: the app needs no restart.
    `claude plugin update sandoq@sandoq`. With the developer way, replace the folder named in
    `CLAUDE_CODE_PLUGIN_DIRS`.
 2. Open a new session. After an update `/sandoq` is no command in a session that began before it.
-3. Check the version with `/plugin` (Installed tab): it is 0.8.66. The Operator lens says it too, at
-   its foot: "pane 0.8.66 · draws N · scene N".
+3. Check the version with `/plugin` (Installed tab): it is 0.8.74. The Operator lens says it too, at
+   its foot: "pane 0.8.74 · draws N · scene N".
 
-An install of 0.8.65 takes no update while the number is the same, so the number moved to 0.8.66.
+An install of 0.8.73 takes no update while the number is the same, so the number moved to 0.8.74.
 
 ## Renew a pane that stands
 
@@ -84,7 +84,7 @@ and then `claude plugin install sandoq@sandoq`.
 3. When the source is another one, such as a folder: run `claude plugin marketplace remove sandoq`,
    then do the install steps from the top (step 0 says what the folder one may hold), then open a
    new session.
-4. Check: `/plugin` says 0.8.66, and the Operator lens says "pane 0.8.66" at its foot.
+4. Check: `/plugin` says 0.8.74, and the Operator lens says "pane 0.8.74" at its foot.
 
 Claude keeps the options `bridge`, `gate` and `sandoq` by plugin id, so a move loses the ones you
 set by hand: set them again after the move. A pane that you turned off stays off.
@@ -205,11 +205,18 @@ Only while the Room place is open, and again at each poll while it stays:
 
 The pane writes one file, `pane.json`, in the run folder: its settings and the card
 "Settings changed". The submit hook writes one file more, `room-pane-sessions.json`, at the top of
-the run folder. A card or a tap goes through the room's programs: `room.sh say`, `room.sh tap`,
+the run folder. Outside it the pane writes your `keybindings.json` (in `~/.claude`, or the folder
+`CLAUDE_CONFIG_DIR` names) only when you press "Add them to your keys" in Settings, and then only
+the Chat lines it lacks. It reads that file when it opens, to know whether the keys are set. A card
+or a tap goes through the room's programs: `room.sh say`, `room.sh tap`,
 and for a reply or a say about a record `card.py` and `feed.sh` of the room's own programs, run in
 the run folder. For a marked room the same acts are `sandoq room tap` and `sandoq room run` with the
 bare name of the program (`feed`, `tap`, `rule`, and `card` for a reply or a say about a record),
-run in the room's folder. The bar's "To the room" is your own card: `sandoq room card --no-seat`,
+run in the room's folder. For the Nudge of the pane's seat (README, Nudge) a marked room runs
+`sandoq room nudge ROOM --seat SEAT` in the room's folder and the world runs `salam/cli.py nudge
+--seat SEAT`, each with `--json`, and with `--every D` or `--off` only on your press; it is read
+when the pane opens, on a press and at a wake. The bar's "To the room" is your own card:
+`sandoq room card --no-seat`,
 one call, with no feed after it. The tool
 `room_say` and the command `/room-say` say as the session: `sandoq room say` run in the session's
 folder, where sandoq reads the seat.

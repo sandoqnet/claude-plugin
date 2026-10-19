@@ -1,8 +1,9 @@
 import { VERSION, roomPagePath } from '../host'
 import { CALM_HOUR, HOUR_OWN_LINE, backgroundLine, isOwnWall } from '../model/background'
 import type { Background } from '../model/background'
-import { FROM_DESK, deskRows, doneToday, hisCount, rowKey } from '../model/desk'
+import { FROM_DESK, deskRows, doneToday, hisCount, rowKey, shapesAnsweredToday } from '../model/desk'
 import type { DeskCard, DeskRow } from '../model/desk'
+import { chatThread } from '../model/chat'
 import { feedOf, quietOf } from '../model/feed'
 import { keeperRows } from '../model/keeperrow'
 import { countOf, stripUlid } from '../model/blocks'
@@ -19,17 +20,20 @@ import type { Settings } from '../model/settings'
 import { SHOWN_CARDS } from '../model/shelf'
 import { THIS_SEAT, askedWait, asideLast, level, seatFace, seatWindow, waitsLine, waitsOnHim } from '../model/seat'
 import type { SeatState } from '../model/seat'
-import { feedLines } from '../model/roomfeed'
+import { feedLines, openShapes, shapeAsks } from '../model/roomfeed'
+import type { ShapeAsk } from '../model/roomfeed'
 import { isIdle, roomOf, sizeOf as bytesWords } from '../model/roomplace'
 import { MAKE_BUTTON, MAKING, START_BUTTON, STARTING, linesAtWord, makeWords } from '../model/roomstart'
 import { freshCount, whoseOf } from '../model/shelfreads'
 import { rulesToday, shelfOf } from '../model/shelfplace'
 import { FACES, openAsks } from '../model/walk'
+import type { WalkText } from '../model/walk'
 import { OPEN_PAGE } from '../model/pages'
 import { writeLineOf, yourCardsOf } from '../model/yourcards'
 import { BAR_HEIGHT, captureView, keyLineView } from './capture'
 import type { KeyPlace } from './capture'
 import { cardView } from './card'
+import { CHAT_LIST, chatRoomOf, chatView, holdsThread } from './chat'
 import { DESK_LIST, deskItemView, deskView, itemTitleOf } from './desk'
 import { isApp } from './glass'
 import { hotkeyProps, hotkeysOn } from './keys'
@@ -46,9 +50,11 @@ import { roomView } from './room'
 import { doorView, playsView, roomCardView, roomFeedView } from './roomcard'
 import { sceneElement } from './scene'
 import { LETTER_TEXT, levelView, seatView } from './seat'
+import { shapeView } from './shape'
 import type { SeatProps } from './seat'
 import { seatWindowView, seatsView } from './seats'
-import { secretsView, settingsParts } from './settings'
+import { nudgeShown } from '../model/nudge'
+import { keysView, nudgeView, secretsView, settingsParts } from './settings'
 import { settingsListView } from './settingslist'
 import { busyOf, versionsView } from './versions'
 import { wordRows, wrapRows } from './versions-table'
@@ -635,6 +641,23 @@ function publicView(state: RoomState) {
   const model: SeatState = { walks, seatsText, seat, now, zone, entries }
   // The app with no room says so alone: no seat face, so no "Nothing waits on" a seat that is a folder's name.
   if (state.app && !state.exists) return noRoomView(state)
+  // The keeper's shape ask, opened from the desk: its own gate view (Yes makes the todo, No leaves it), not a letter of the walks.
+  const shape = shapeOfNav(state)
+  if (shape !== undefined) {
+    return [
+      ...noRoomView(state),
+      ...shapeView({
+        ui,
+        plan: state.plan,
+        columns: state.columns,
+        app: state.app,
+        ask: shape,
+        now,
+        sent: (state.shapeSent ?? []).includes(shape.id),
+        actions: { tap: choice => actions.tap(shape.id, shape.id, choice) },
+      }),
+    ]
+  }
   if (state.app && nav.view === 'level') {
     const up = level(model)
     return [
@@ -713,10 +736,11 @@ function publicView(state: RoomState) {
       : nav.view === 'yours'
         ? face.waits.filter(wait => wait.cardId === nav.cardId)
         : asideLast(face.waits, aside)
-  const seatPart = (part: 'whole' | 'head' | 'rest', text?: SeatProps['text']) =>
+  const seatPart = (part: 'whole' | 'head' | 'rest', text?: SeatProps['text'], thread?: SeatProps['thread']) =>
     seatView({
       part,
       ...(text === undefined ? {} : { text }),
+      ...(thread === undefined ? {} : { thread }),
       ui,
       ...frameOf(state),
       surface: surfaceOf(state),
@@ -744,7 +768,8 @@ function publicView(state: RoomState) {
         ...(wait.reason === undefined ? {} : { reason: wait.reason }),
       })),
       others: face.others,
-      answered: face.answeredToday,
+      // the shape asks he closed today count here as on the desk, for this seat's own face
+      answered: face.answeredToday + (named === undefined ? shapesAnsweredToday(shapeAsks(state.feed), now, zone).length : 0),
       folds: (nav.view === 'wait' || nav.view === 'yours' ? [] : answeredOpen ? face.today : face.folds).map(fold => ({ act: fold.act, title: fold.title, ...(fold.detail === undefined ? {} : { detail: fold.detail }) })),
       actions: {
         open: cardId => actions.openCard?.(cardId),
@@ -800,6 +825,21 @@ function publicView(state: RoomState) {
         ? undefined
         : canvasRowsNow(state) - LINK_ROWS - above.reduce((sum, part) => sum + sizeOf(part, state.plan.width, names).h + SPACE.block, 0)
     const onPage = (list: string, page: number) => void actions.page?.(list, page)
+    const walkText = walks.find(walk => walk.id === nav.cardId)?.text
+    // His chat with the keeper stands between the card's words and its ask (order keeper chat). It takes at most half of the rows the card has, and pages
+    // newest last inside them. The terminal's rows are what its frame leaves less the head and the tabs.
+    const termLeft =
+      state.app || state.termRoom === undefined ? undefined : state.termRoom - above.reduce((sum, part) => sum + sizeOf(part, state.columns, names).h + SPACE.block, 0)
+    const chatLeft = left ?? termLeft
+    const thread = chatView({
+      ui,
+      app: state.app,
+      lines: chatThread(walkText ?? '', state.chatSent?.[nav.cardId] ?? []),
+      cells: state.app ? innerOf(state.plan.width, state.columns) : Math.max(1, state.columns - 4),
+      ...(chatLeft === undefined || state.chatWhole === true ? {} : { room: chatRoomOf(chatLeft) }),
+      ...(state.pages?.[CHAT_LIST] === undefined ? {} : { page: state.pages[CHAT_LIST] }),
+      onPage: next => onPage(CHAT_LIST, next),
+    })
     return [
       ...above,
       ...(tab === 'walk'
@@ -808,12 +848,12 @@ function publicView(state: RoomState) {
             plan: state.plan,
             columns: state.columns,
             app: state.app,
-            text: walks.find(walk => walk.id === nav.cardId)?.text,
+            text: walkText,
             open: state.walkOpen ?? '',
             actions: { row: onRow },
             ...(left === undefined ? {} : { room: left, pages: state.pages, onPage }),
           })
-        : seatPart('rest', left === undefined ? undefined : { room: left, page: state.pages?.[LETTER_TEXT] ?? 0, onPage: next => onPage(LETTER_TEXT, next) })),
+        : seatPart('rest', left === undefined ? undefined : { room: left, page: state.pages?.[LETTER_TEXT] ?? 0, onPage: next => onPage(LETTER_TEXT, next) }, thread)),
     ]
   }
   if (!state.app || !state.exists || nav.view === 'wait') return [...noRoomView(state), ...body]
@@ -982,6 +1022,27 @@ const settingsPlace = (state: RoomState) => {
             },
           }),
         ]
+  // The Nudge card (order nudge pane): the state of the verb for this pane's seat, and its intervals; with no card handed over it is not drawn.
+  const nudge =
+    state.nudgeCard === undefined
+      ? []
+      : [
+          nudgeView({
+            ui,
+            ...frameOf(state),
+            surface: surfaceOf(state),
+            width: state.layer,
+            card: state.nudgeCard,
+            zone: state.zone ?? 0,
+            keysSet: state.keysSet === true,
+            actions: { every: every => void actions.nudge?.(every), toggle: () => void actions.nudge?.() },
+          }),
+        ]
+  // The Keys card (order keys): what his keybindings.json says of the five keys; with no card handed over it is not drawn.
+  const keys =
+    state.keysCard === undefined
+      ? []
+      : [keysView({ ui, ...frameOf(state), surface: surfaceOf(state), width: state.layer, card: state.keysCard, actions: { add: () => void actions.addKeys?.() } })]
   if (app) {
     // The app's Settings is the list of its sections; one section opens alone, with "Back to Settings" on top (the canvas's).
     const section = nav.view === 'settings' ? nav.section : undefined
@@ -989,16 +1050,16 @@ const settingsPlace = (state: RoomState) => {
       return settingsListView({
         ui,
         ...frameOf(state),
-        data: { settings: settingsOf(state), face: state.face, rules: rules.length, versions: state.versionsCard, secrets: state.secretsCard },
+        data: { settings: settingsOf(state), face: state.face, rules: rules.length, versions: state.versionsCard, secrets: state.secretsCard, nudge: state.nudgeCard, keys: state.keysCard },
         canvasRows: canvasRowsNow(state) - LINK_ROWS,
         page: state.pages?.settings ?? 0,
         ...(state.opened?.view === 'settings' && state.opened.section !== undefined ? { openSection: state.opened.section } : {}),
         actions: { open: id => actions.open({ view: 'settings', section: id }), page: (list, page) => void actions.page?.(list, page) },
       })
     }
-    return { lens, feed: [parts.groups.lenses], scene: [withBackgroundLine(state, parts.groups.scene)], rules: [parts.rules], secrets, versions }[section]
+    return { lens, feed: [parts.groups.lenses], scene: [withBackgroundLine(state, parts.groups.scene)], rules: [parts.rules], secrets, nudge, keys, versions }[section]
   }
-  return [...backView(state), ...reachLenses(state), parts.groups.lenses, parts.groups.scene, parts.rules, ...secrets, ...lens, ...versions, <Text key="nav-space"> </Text>]
+  return [...backView(state), ...reachLenses(state), parts.groups.lenses, parts.groups.scene, parts.rules, ...secrets, ...nudge, ...keys, ...lens, ...versions, <Text key="nav-space"> </Text>]
 }
 
 // The Room place (order A-W6), under Operator alone: who sits, what it plays, the door, the programs running and what
@@ -1119,16 +1180,34 @@ const NO_DESK_CARD: DeskCard = { state: 'rest', items: [], lines: {}, line: '', 
 
 // The rows of his desk: this seat's open asks (the letters), the keeper's picks of the day on his asks he has not taken off (order T3), then the
 // items sandoq lists, in the one order of model/desk.ts.
-const deskRowsOf = (state: Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now' | 'zone' | 'entries' | 'deskCard' | 'keeperOk'>): DeskRow[] =>
+// The keeper's open shape asks (the proposals to make a todo, read from the feed) stand with his letters.
+type DeskState = Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now' | 'zone' | 'entries' | 'deskCard' | 'keeperOk' | 'feed'>
+const deskRowsOf = (state: DeskState): DeskRow[] =>
   deskRows(
     seatFace({ walks: state.walks, seatsText: state.seatsText ?? '', seat: state.seat ?? '', now: state.now, zone: state.zone, entries: state.entries }).waits,
     (state.deskCard ?? NO_DESK_CARD).items,
     keeperRows({ walks: state.walks, seatsText: state.seatsText ?? '', seat: state.seat ?? '', now: state.now, zone: state.zone, entries: state.entries }, new Set(state.keeperOk ?? [])),
+    openShapes(state.feed),
   )
 
-// The count the dock and the tray say: the rows that wait on him, letters, the keeper's picks and his open items; none for a seat's. The terminal's
-// Desk N, its status line and the band over the prompt (the register's bandText) say this one number.
-export const deskCountOf =(state: Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now' | 'zone' | 'entries' | 'deskCard' | 'keeperOk'>): number => hisCount(deskRowsOf(state))
+// The count the dock and the tray say: the rows that wait on him, letters, the keeper's shape asks, the keeper's picks and his open items; none for a seat's.
+// The terminal's Desk N, its status line and the band over the prompt (the register's bandText) say this one number.
+export const deskCountOf = (state: DeskState): number => hisCount(deskRowsOf(state))
+
+// The shape ask a wait names: the desk opens it as a wait whose card and ask are its own id (a letter's card and ask are two ids). Open or closed.
+function shapeOfNav({ nav, feed }: Pick<RoomState, 'nav' | 'feed'>): ShapeAsk | undefined {
+  if (nav.view !== 'wait' || nav.from !== FROM_DESK || nav.cardId !== nav.askId) return undefined
+  const id = nav.cardId
+  return shapeAsks(feed).find(ask => ask.id === id)
+}
+
+// The card the bar can chat about with the keeper (order keeper chat): a letter opened from the desk whose card has its walk in the room. A shape ask lies on no
+// card of the walks and has no thread. '' for any other place.
+function chatCardOf(nav: Nav, walks: WalkText[], feed: RoomState['feed']): string {
+  if (nav.view !== 'wait' || nav.from !== FROM_DESK || shapeOfNav({ nav, feed }) !== undefined) return ''
+  const id = nav.cardId
+  return walks.some(walk => walk.id === id) ? id : ''
+}
 
 // HIS DESK (order DESK, D2), the place the pane opens on: the list of the open pile, or one item opened from it, a step from the desk. A letter opens
 // as a wait of this seat (publicView), with its picks. Under 128 columns the item takes the list's place with `‹ Desk`; from 128 it stands at the right.
@@ -1186,7 +1265,9 @@ function deskPlace(state: RoomState) {
       pile: nav.pile,
       now,
       card,
-      answered: face.answeredToday,
+      // the shape asks he closed today count as answers do
+      answered: face.answeredToday + shapesAnsweredToday(shapeAsks(state.feed), now, zone).length,
+      sent: state.shapeSent ?? [],
       done: doneToday(card.items, now, zone),
       canvasRows: state.rows === undefined ? undefined : canvasRowsNow(state) - LINK_ROWS,
       page: state.pages?.[DESK_LIST] ?? 0,
@@ -1196,6 +1277,8 @@ function deskPlace(state: RoomState) {
         openPile: key => void actions.open({ view: 'desk', pile: key, ...(nav.group === undefined ? {} : { group: nav.group }) }),
         openRow: row => {
           if (row.row === 'ask') return void actions.open({ view: 'wait', cardId: row.wait.cardId, askId: row.wait.askId, from: FROM_DESK, ...keep })
+          // The keeper's shape ask opens as a wait whose card and ask are its own id (shapeOfNav), in the gate view of views/shape.tsx.
+          if (row.row === 'shape') return void actions.open({ view: 'wait', cardId: row.shape.id, askId: row.shape.id, from: FROM_DESK, ...keep })
           // The keeper's pick: Change opens the ask it answered, as a letter opens, with its choices.
           if (row.row === 'pick') return void actions.open({ view: 'wait', cardId: row.pick.cardId, askId: row.pick.askId, from: FROM_DESK, ...keep })
           // A link opens in his browser and the row says so; any other item opens a step from the desk.
@@ -1205,6 +1288,8 @@ function deskPlace(state: RoomState) {
         keeperOk: key => void actions.keeperOk?.(key),
         keeperOkAll: keys => void actions.keeperOkAll?.(keys),
         foldPicks: () => void actions.foldPicks?.(),
+        // Yes is Make and No is Leave: the ask's id is both the card and the ask of the tap.
+        shape: (id, choice) => void actions.tap(id, id, choice),
         done: id => void actions.doneDesk?.(id),
         page: page => void actions.page?.(DESK_LIST, page),
         openAnswered: () => void actions.open({ view: 'answered' }),
@@ -1221,7 +1306,11 @@ const answeredPlace = (state: RoomState) => {
   return answeredView({
     ui,
     ...frameOf(state),
-    folds: face.today.map(fold => ({ act: fold.act, title: fold.title })),
+    // the shape asks he closed today stand after the letters, by what he took (Make or Leave)
+    folds: [
+      ...face.today.map(fold => ({ act: fold.act, title: fold.title })),
+      ...shapesAnsweredToday(shapeAsks(state.feed), now, zone).map(ask => ({ act: ask.decided?.choice ?? '', title: ask.title })),
+    ],
     rows: canvasRowsNow(state) - LINK_ROWS,
     page: state.pages?.answered ?? 0,
     onPage: page => {
@@ -1326,6 +1415,20 @@ const placeNavOf = (place: KeyPlace): Nav => (place === 'desk' ? { view: 'desk' 
 const tabOf = (nav: Nav): KeyPlace | undefined =>
   nav.view === 'desk' || (nav.view === 'wait' && nav.from === FROM_DESK) ? 'desk' : nav.view === 'shelf' || nav.view === 'profile' ? 'shelf' : nav.view === 'room' ? 'door' : undefined
 
+// Where the terminal's Back goes, and its words from the longest to the shortest (order 341734, fault 2): the place it CAME from. Settings opened from the
+// Door goes back to the Door, from the Desk or the Shelf to that tab (the register keeps the place in `came`), and a section of Settings (Versions) to
+// the Door it was opened from, else to Settings; any other place goes to this seat's face, as it has.
+const CAME_WORDS: Record<KeyPlace, string> = { desk: 'Back to the Desk', shelf: 'Back to the Shelf', door: 'Back to the Door' }
+function terminalBackOf(state: RoomState): { words: string[]; press: () => void } {
+  const { nav, seat = '', actions, came } = state
+  const home = { words: [backWords(seat), 'Back', '‹'], press: () => void goBack(state) }
+  if (nav.view !== 'settings') return home
+  const place = came === undefined ? undefined : tabOf(came)
+  if (came !== undefined && place !== undefined && (nav.section === undefined || place === 'door')) return { words: [CAME_WORDS[place], 'Back', '‹'], press: () => void actions.open(came) }
+  if (nav.section !== undefined) return { words: ['Back to Settings', 'Back', '‹'], press: () => void actions.open({ view: 'settings' }) }
+  return home
+}
+
 // Whether the place open is a root of one of the three tabs: it has no Back, the tab is its way.
 const isTabRoot = (nav: Nav): boolean =>
   (nav.view === 'desk' && nav.item === undefined) || (nav.view === 'shelf' && (nav.of === undefined || nav.of === '')) || (nav.view === 'room' && nav.card === undefined && nav.from === undefined)
@@ -1379,7 +1482,7 @@ function tabPlanOf(state: RoomState): TabPlan {
   }
   const backCells = (words: string): number => TAB_GAP + buttonCells(words, false, BACK_KEY)
   const wantsBack = showsBack(nav, seat) && !isTabRoot(nav)
-  const words = [backWords(seat), 'Back', '‹']
+  const words = terminalBackOf(state).words
   const settingsCells = TAB_GAP + buttonCells('Settings')
   const back = !wantsBack ? undefined : (words.find(one => coreCells + backCells(one) + settingsCells <= columns) ?? words.find(one => coreCells + backCells(one) <= columns) ?? '‹')
   const held = heldAt(coreCells + (back === undefined ? 0 : backCells(back)))
@@ -1451,7 +1554,7 @@ function terminalTabs(state: RoomState) {
           variant="secondary"
           hotkey={BACK_KEY}
           onPress={() => {
-            void goBack(state)
+            void terminalBackOf(state).press()
           }}
         />
       )}
@@ -1501,7 +1604,7 @@ function terminalFrame(state: RoomState): { top: any[]; back: any[]; foot: any[]
   if (size === 'wide') return { top: [terminalTabs(state)], back: [], foot: [terminalStatus(state)], bare: false }
   const rest = isRest(nav, seat, state.exists)
   return {
-    top: [keyLineView({ ui, onOpen: place => void actions.open(placeNavOf(place)), ...(rest ? {} : { onBack: () => void goBack(state) }) })],
+    top: [keyLineView({ ui, onOpen: place => void actions.open(placeNavOf(place)), ...(rest ? {} : { onBack: () => void terminalBackOf(state).press() }), prefix: state.keysSet === true })],
     back: [],
     foot: [],
     bare: rest,
@@ -1803,6 +1906,9 @@ export function paneView(props: PlaceProps) {
   // rule's Input stands in the canvas, after the face's body.
   const hasBar = !app && nav.view !== 'settings'
   const adding = state.adding === true && actions.sendRule !== undefined
+  // Nudge (order nudge pane): the toggle at the right of the bar's top line, for a pane with a seat and a road to the verb.
+  const nudgeCard = state.nudgeCard
+  const nudgeBar = actions.nudge !== undefined && nudgeShown(nudgeCard) ? { card: nudgeCard, press: () => void actions.nudge?.() } : undefined
   const bar = !hasBar
     ? []
     : adding
@@ -1817,8 +1923,10 @@ export function paneView(props: PlaceProps) {
           entries,
           surface: surfaceOf(state),
           seatTo: state.seatTo,
+          keeper: chatCardOf(nav, props.walks, state.feed),
           actions,
           columns: bodyColumns,
+          ...(nudgeBar === undefined ? {} : { nudge: nudgeBar }),
         })
   const ruleCard = app && adding ? ruleBar(state) : []
   const { Text } = ui
@@ -1854,7 +1962,7 @@ export function paneView(props: PlaceProps) {
     const room = app ? (state.starterFirst === true ? canvasRowsPlain(state) : canvasRowsNow(state)) - LINK_ROWS : (state.termRoom as number)
     const framed: Plan = app ? plan : { ...plan, width: bodyColumns }
     // A letter of the desk with its tabs pages its own words or rows inside its card (publicView), under its head, which stays.
-    const ownTabs = at.view === 'wait' && at.from === FROM_DESK && actions.letterTab !== undefined
+    const ownTabs = at.view === 'wait' && at.from === FROM_DESK && actions.letterTab !== undefined && shapeOfNav({ nav: at, feed: state.feed }) === undefined
     const placed = ownTabs || pagesItself(at, props.seat ?? '', state.versionsCard?.table !== undefined && state.versionsCard.older !== true)
       ? body
       : pagedBody({ ui, plan: framed, columns: bodyColumns, rows: room, pages: state.pages, scope, onPage: (list, page) => void actions.page?.(list, page) }, body)
@@ -1865,7 +1973,10 @@ export function paneView(props: PlaceProps) {
     // THE TERMINAL NEVER SAYS "needs N rows" while a page can hold a part (order mend terminal real, mend 4): the body is cut into its parts and paged
     // under one row of links (views/termpage.tsx); the line stays only where not even one part stands with the links.
     if (app || fitted.length !== 1 || (fitted[0]?.key ?? fitted[0]?.props?.key) !== 'fit-line') return fitted
-    return terminalPaged({ ui, columns: bodyColumns, room, pages: state.pages, onPage: (list, page) => void actions.page?.(list, page) }, body) ?? fitted
+    // ONE PAGER ON A PAGE (order chat pager): a letter with his chat that the terminal pages hands the thread's rows to this pager, which opens on the thread's
+    // last page; the thread's own pager draws only where the letter is one page (it fitted above).
+    const whole = ownTabs && state.chatWhole !== true && body.some(holdsThread) ? FACE_VIEWS[faceOf(at)]({ ...state, chatWhole: true }) : body
+    return terminalPaged({ ui, columns: bodyColumns, room, pages: state.pages, onPage: (list, page) => void actions.page?.(list, page) }, whole) ?? fitted
   }
   const faceBody = app && props.windowOpen === false ? [] : frame?.bare === true ? [] : paged(FACE_VIEWS[faceOf(nav)](state), nav, '')
   // From 128 columns an opened row stands at the right of its list (listOf): the list is drawn by the same face views, on its own nav.

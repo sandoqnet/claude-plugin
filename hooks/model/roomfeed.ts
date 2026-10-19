@@ -1,6 +1,8 @@
 // The room's feed (order room-feed, part A): feed/GATE.md of the run, append only. Two kinds of block, in the document form of the walks:
 //   SAYER / { feed::KIND::entry }   (34,3)  KIND his, row, answer or memory; the fence holds id, session, seat, seq and at; the body is the text whole
 //   @ID / { feed::door::answer }    (13,3)  a LATER block, after its entry, that the door wrote: to, card, rule, noul, fault, on and at
+//   @ENTRYID / { feed::shape::ask }          (21,2)  a LATER block under his entry, that the keeper wrote: id, shape, title, why, choices, lean, by and at
+//   @ASKID Make|Leave / { feed::shape::decided } (13,3) the block that closes an ask: the choice is in the head; by, made (Make only) and at in the fence
 // The entry is written before the door asks, so an entry may have no answer yet. Pure, with no `$`: the views only lay out what is read here, and the register
 // toasts what freshFeed gives. Run by `node` too: no enums, `import type`, `.ts` in imports.
 import { ID_FIRST, fenceText, parseBlocks } from './blocks.ts'
@@ -12,8 +14,38 @@ import type { Ring } from './bell.ts'
 // door's key, 60 characters at most); an answer of an older door, or one for an entry that answers nothing known, has none.
 export type FeedAnswer = { to: string[]; card: string; rule: string; fault: string; at: string; n: number; on?: string }
 
-// One entry of the feed with its answer, or none while the door has not answered.
-export type FeedEntry = { id: string; kind: string; sayer: string; session: string; seat: string; seq: string; at: string; text: string; answer?: FeedAnswer }
+// What closed a shape ask: the choice its block's head names (Make or Leave), who took it, the todo it made (Make only; a Leave has none) and when.
+export type ShapeDecided = { choice: string; by: string; made: string; at: string }
+
+// The keeper's proposal to make a shape of an entry (a todo), with the words of the entry it stands under. OPEN while no decided block names its id.
+export type ShapeAsk = {
+  id: string
+  entry: string
+  words: string
+  shape: string
+  title: string
+  why: string
+  choices: string[]
+  lean: string
+  by: string
+  at: string
+  atMs: number
+  decided?: ShapeDecided
+}
+
+// One entry of the feed with its answer, or none while the door has not answered. `shapes` are the asks standing under it, none where it has no ask.
+export type FeedEntry = {
+  id: string
+  kind: string
+  sayer: string
+  session: string
+  seat: string
+  seq: string
+  at: string
+  text: string
+  answer?: FeedAnswer
+  shapes?: ShapeAsk[]
+}
 
 export const TOASTS = 'desk/toasts'
 
@@ -39,8 +71,24 @@ const sayerOf = (block: Block): string => block.words.replace(/^[\s/]+|[\s/]+$/g
 export function parseFeed(text: string): FeedEntry[] {
   const entries: FeedEntry[] = []
   const byId = new Map<string, FeedEntry>()
+  const decided = new Map<string, ShapeDecided>()
+  const asks: ShapeAsk[] = []
   parseBlocks(text).forEach((block, n) => {
     if (block.chi !== 'feed') return
+    if (block.che === 'shape') {
+      if (block.cho === 'ask') {
+        const entry = byId.get(ID_FIRST.exec(block.words)?.[1] ?? '')
+        const ask = entry === undefined ? undefined : shapeAskOf(block, entry)
+        if (entry === undefined || ask === undefined) return
+        entry.shapes = [...(entry.shapes ?? []), ask]
+        asks.push(ask)
+      } else if (block.cho === 'decided') {
+        const id = ID_FIRST.exec(block.words)?.[1] ?? ''
+        const choice = block.words.replace(/[\s/]+$/, '').split('/').pop()?.trim() ?? ''
+        if (id !== '' && choice !== '' && !decided.has(id)) decided.set(id, { choice, by: wordOf(block, 'by'), made: wordOf(block, 'made'), at: wordOf(block, 'at') })
+      }
+      return
+    }
     if (block.cho === 'entry') {
       const id = fenceText(block, 'id').trim()
       if (id === '' || byId.has(id)) return
@@ -54,8 +102,49 @@ export function parseFeed(text: string): FeedEntry[] {
       entry.answer = { to: addressesOf(block), card: wordOf(block, 'card'), rule: wordOf(block, 'rule'), fault: wordOf(block, 'fault'), at: wordOf(block, 'at'), n, ...(on === '' ? {} : { on }) }
     }
   })
+  // A decided block comes after its ask, but it is met by the ask's id, so the order of the file is not trusted.
+  for (const ask of asks) {
+    const closed = decided.get(ask.id)
+    if (closed !== undefined) ask.decided = closed
+  }
   return entries
 }
+
+// The choices of an ask: a list, or words apart by commas; the two of the contract where the block holds none.
+function choicesOf(block: Block): string[] {
+  const value = block.fence.choices
+  const words = Array.isArray(value) ? value.map(String) : typeof value === 'string' ? value.split(',') : []
+  const list = [...new Set(words.map(word => word.trim()).filter(word => word !== ''))]
+  return list.length === 0 ? ['Make', 'Leave'] : list
+}
+
+// One ask of the fence, or none when it holds no id. `entry` is the entry the block stands under: its words are copied, so the ask is read without it.
+function shapeAskOf(block: Block, entry: FeedEntry): ShapeAsk | undefined {
+  const id = wordOf(block, 'id')
+  if (id === '') return undefined
+  const at = wordOf(block, 'at')
+  const ms = Date.parse(at)
+  return {
+    id,
+    entry: entry.id,
+    words: entry.text,
+    shape: wordOf(block, 'shape') || 'todo',
+    title: firstLineOf(wordOf(block, 'title')),
+    why: firstLineOf(wordOf(block, 'why')),
+    choices: choicesOf(block),
+    lean: wordOf(block, 'lean'),
+    by: wordOf(block, 'by'),
+    at,
+    atMs: Number.isFinite(ms) ? ms : 0,
+  }
+}
+
+// What the press and the toast of an ask say: `Make a todo: List the boxes to rent, with prices`.
+export const shapeWords = (ask: ShapeAsk): string => `Make a ${ask.shape}: ${ask.title}`
+
+// Every ask of a feed in the order they were written, and the ones still open (no decided block names them).
+export const shapeAsks = (entries: FeedEntry[] | undefined): ShapeAsk[] => (entries ?? []).flatMap(entry => entry.shapes ?? [])
+export const openShapes = (entries: FeedEntry[] | undefined): ShapeAsk[] => shapeAsks(entries).filter(ask => ask.decided === undefined)
 
 // The first line of a text, cut of its blanks.
 export const firstLineOf = (text: string): string => (text.split('\n').find(line => line.trim() !== '') ?? '').replace(/\s+/g, ' ').trim()

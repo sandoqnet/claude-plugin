@@ -13,12 +13,14 @@ import { PAGE_NOT_SHOWN } from '../model/page'
 import { pageAt, pageWords } from '../model/pages'
 import type { Page } from '../model/pages'
 import { ageWords } from '../model/profile'
+import { shapeWords } from '../model/roomfeed'
 import { BUTTON_CELLS, buttonCells } from './cells'
 import { deskArt } from './deskart'
 import { pageView } from './page'
 import { EARLIER, moreWords } from './pager'
 import { CARD_ROWS } from './paged'
 import { pressBox, pressHigh, pressLinesOf, pressPagerRows, pressPagerView, pressStackRows, pressWidth } from './press'
+import { LEAVE, MAKE, NO, SHAPE_NO_KEY, SHAPE_YES_KEY, YES, leansToNo } from './shape'
 import { CELL, SPACE } from './space'
 import { terminalPagerRows } from './termpage'
 import { LOOK } from './look'
@@ -40,6 +42,10 @@ export const NOTHING_WAITS = 'Nothing waits on you.'
 export const NOTHING_MORE = 'A seat that needs you puts its item on your desk.'
 export const READING_DESK = 'Reading your desk.'
 export const NO_OPEN_WORD = 'The pane cannot open this origin.'
+// What stands in place of a shape ask's Yes and No from the tap until the feed is read with the decided block: one tap an ask.
+export const SHAPE_HELD = 'sent'
+// The least cells the app gives the title of a shape ask beside its Yes and No; under them the two stand in a line under the title.
+const SHAPE_TITLE_LEAST = 20
 
 const KIND_WORD: Record<string, string> = { letter: 'a letter', sign: 'to sign', decision: 'to decide', test: 'to test', reading: 'to read' }
 
@@ -55,6 +61,8 @@ export type DeskActs = {
   // Two or more picks stand as one row (order D2): OK all takes them all off in one write, and a press on the row opens them in place or folds them.
   keeperOkAll: (keys: string[]) => void
   foldPicks: () => void
+  // Yes (Make) or No (Leave) on the keeper's shape ask, by its id: one tap an ask.
+  shape: (id: string, choice: string) => void
   done: (id: string) => void
   page: (page: number) => void
   openAnswered: () => void
@@ -80,6 +88,8 @@ export type DeskViewProps = {
   // What he answered and what he took off the desk today.
   answered: number
   done: number
+  // The shape asks (their ids) he tapped and whose decided block is not read yet: their Yes and No are held.
+  sent?: string[]
   // The rows the canvas leaves for the card (less the strip); none is a host that does not say them, and the list is not cut to a height nobody told.
   canvasRows: number | undefined
   page: number
@@ -107,13 +117,17 @@ export function wrapped(words: string, cells: number): string[] {
   return lines
 }
 
-const wordsOf = (row: DeskRow): string => (row.row === 'ask' ? row.wait.title : row.row === 'pick' ? rowWords(row.pick) : row.item.words)
-const ageOf = (row: DeskRow, now: number): string => (row.row === 'ask' ? row.wait.age : row.row === 'pick' ? ageWords(row.pick.atMs, now) : ageWords(row.item.atMs, now))
+const wordsOf = (row: DeskRow): string =>
+  row.row === 'ask' ? row.wait.title : row.row === 'shape' ? shapeWords(row.shape) : row.row === 'pick' ? rowWords(row.pick) : row.item.words
+const ageOf = (row: DeskRow, now: number): string =>
+  row.row === 'ask' ? row.wait.age : row.row === 'shape' ? ageWords(row.shape.atMs, now) : row.row === 'pick' ? ageWords(row.pick.atMs, now) : ageWords(row.item.atMs, now)
 const forOf = (row: DeskRow): string => (row.row === 'item' ? row.item.for : 'you')
 
 // The dim line of one of his rows: the mark and the word of its origin, who put it (or its kind where the piles are the seats), the age where the
 // first line has none, and `for you` (or that its page opened in his browser).
 export function dimOf(row: DeskRow, group: Group, wide: boolean, now: number, opened: boolean): string {
+  // The keeper's shape ask: the why, then who proposes it, the age where the first line has none.
+  if (row.row === 'shape') return [row.shape.why, row.shape.by === '' ? '' : `by ${row.shape.by}`, ...(wide ? [] : [ageOf(row, now)])].filter(part => part !== '').join(' · ')
   const origin = rowOrigin(row)
   const by = rowBy(row)
   return [
@@ -161,6 +175,12 @@ export function deskView(props: DeskViewProps) {
   // The keeper's pick takes two presses beside it: Change and OK (order T3); the fold takes OK all.
   const picksW = pressWidth('Change') + pressWidth('OK') + beside
   const foldW = pressWidth('OK all') + beside
+  // The keeper's shape ask takes two presses beside it, Yes and No, or the one word `sent` from the tap until the feed is read with the decided block.
+  const sent = new Set(props.sent ?? [])
+  // The lean one of the two carries the lean dot in its label (`● Yes`), so Yes is counted with it: the widest the two can be.
+  const shapeW = (id: string): number => (sent.has(id) ? cellsOf(SHAPE_HELD) : pressWidth(`${PRESS.leanMark} ${YES}`) + pressWidth(NO) + beside)
+  // In the app, Yes and No that leave the title under SHAPE_TITLE_LEAST cells stand in a line under its box.
+  const stacks = (row: Entry): boolean => app && row.row === 'shape' && inner - shapeW(row.shape.id) - beside < SHAPE_TITLE_LEAST
   const clear = rows.length === 0
   const reading = clear && card.state !== 'done' && card.cannot === '' && !card.older
   const board = card.opened
@@ -172,7 +192,16 @@ export function deskView(props: DeskViewProps) {
   // ---- the rows of the list, with the cells and the lines each takes
   const shapeOf = (row: Entry): Shape => {
     if (row.row === 'fold') return { first: foldWords(row.fold), tail: '', dim: [], boxW: Math.max(inner - foldW, PRESS.least) }
-    const boxW = row.row === 'pick' ? Math.max(inner - picksW - beside, PRESS.least) : hasDone(row) ? inner - doneW - beside : inner
+    const boxW =
+      row.row === 'pick'
+        ? Math.max(inner - picksW - beside, PRESS.least)
+        : row.row === 'shape'
+          ? stacks(row)
+            ? inner
+            : Math.max(inner - shapeW(row.shape.id) - beside, PRESS.least)
+          : hasDone(row)
+            ? inner - doneW - beside
+            : inner
     const cells = boxW - PRESS.across
     if (!isHis(row)) return { first: `${ORIGIN_MARK[rowOrigin(row)]} ${wordsOf(row)}`, tail: '', dim: [], boxW }
     const tail = wide ? ageOf(row, now) : ''
@@ -187,7 +216,7 @@ export function deskView(props: DeskViewProps) {
     const shape = shapeOf(row)
     const said = lineOf(row)
     // the terminal's row is the title and its dim lines, with no edge
-    return (app ? pressHigh(1 + shape.dim.length) : 1 + shape.dim.length) + (said === '' ? 0 : wrapped(said, inner).length)
+    return (app ? pressHigh(1 + shape.dim.length) : 1 + shape.dim.length) + (stacks(row) ? PRESS.high : 0) + (said === '' ? 0 : wrapped(said, inner).length)
   }
 
   // ---- the rows of the card besides its list, by what the canvas leaves: the picture goes first, then the foot's boxes become one line
@@ -294,6 +323,46 @@ export function deskView(props: DeskViewProps) {
 
   // ---- the rows
   // The terminal draws a row as a Button of its words and, for an item that is his, a Done beside it, the dim line under.
+  // The keeper's shape ask in the terminal: the title is the press (cut to what the frame leaves it), Yes and No beside it, the age at the right in the wide
+  // card, the dim line under it (the why, then by whom). Each Button is counted as the host draws it, `[ label ]` (BUTTON_CELLS). The first ask of the page that is
+  // not sent holds the keys `y` and `n`; the second would hold the same, so it holds none. From the tap to the decided block the word `sent` stands for them.
+  const keyedShape = app ? undefined : onPage.find(row => row.row === 'shape' && !sent.has(row.shape.id))
+  const shapeTerminalRow = (row: Extract<Entry, { row: 'shape' }>) => {
+    const key = rowKey(row)
+    const ask = row.shape
+    const held = sent.has(ask.id)
+    const shape = shapeOf(row)
+    const keyed = keyedShape === row
+    const toNo = leansToNo(ask)
+    const acts = 1 + (held ? cellsOf(SHAPE_HELD) : buttonCells(YES, false, keyed ? SHAPE_YES_KEY : undefined) + 1 + buttonCells(NO, false, keyed ? SHAPE_NO_KEY : undefined))
+    const title = fitted(shape.first, Math.max(1, frameInner - BUTTON_CELLS - acts - (shape.tail === '' ? 0 : cellsOf(shape.tail) + 1)))
+    return (
+      <Box key={`slot-${key}`} flexDirection="column">
+        <Box key={`row-${key}`} flexDirection="row" justifyContent="space-between" columnGap={1}>
+          <Box key={`acts-${key}`} flexDirection="row" columnGap={1}>
+            <Button key={key} label={title} onPress={() => actions.openRow(row)} />
+            {held && (
+              <Text key={`held-${key}`} color={LOOK.quiet}>
+                {SHAPE_HELD}
+              </Text>
+            )}
+            {!held && <Button key={`yes-${key}`} label={YES} variant={toNo ? 'secondary' : 'primary'} {...(keyed ? { hotkey: SHAPE_YES_KEY } : {})} onPress={() => actions.shape(ask.id, MAKE)} />}
+            {!held && <Button key={`no-${key}`} label={NO} variant={toNo ? 'primary' : 'secondary'} {...(keyed ? { hotkey: SHAPE_NO_KEY } : {})} onPress={() => actions.shape(ask.id, LEAVE)} />}
+          </Box>
+          {shape.tail !== '' && (
+            <Text key={`age-${key}`} color={LOOK.quiet}>
+              {shape.tail}
+            </Text>
+          )}
+        </Box>
+        {shape.dim.map((line, at) => (
+          <Text key={`dim-${key}-${at}`} color={LOOK.quiet}>
+            {line}
+          </Text>
+        ))}
+      </Box>
+    )
+  }
   const terminalRow = (row: Entry) => {
     if (row.row === 'fold') {
       const words = `${foldWords(row.fold)}${row.open ? ' (open)' : ''}`
@@ -304,6 +373,7 @@ export function deskView(props: DeskViewProps) {
         </Box>
       )
     }
+    if (row.row === 'shape') return shapeTerminalRow(row)
     const key = rowKey(row)
     const shape = shapeOf(row)
     const said = lineOf(row)
@@ -372,6 +442,22 @@ export function deskView(props: DeskViewProps) {
           more: shape.dim,
           onPress: () => actions.openRow(row),
         })
+    // The keeper's shape ask: Yes (Make, the lean one bold) and No (Leave) beside the title, or in a line under it where the card is too narrow for both; the
+    // word `sent` stands for them from the tap until the decided block is read.
+    const ask = row.row === 'shape' ? row.shape : undefined
+    const answers =
+      ask === undefined
+        ? []
+        : sent.has(ask.id)
+          ? [
+              <Text key={`held-${key}`} color={THEME.dim}>
+                {SHAPE_HELD}
+              </Text>,
+            ]
+          : [
+              pressBox({ ui, id: `yes-${key}`, label: YES, lean: !leansToNo(ask), onPress: () => actions.shape(ask.id, MAKE) }),
+              pressBox({ ui, id: `no-${key}`, label: NO, lean: leansToNo(ask), onPress: () => actions.shape(ask.id, LEAVE) }),
+            ]
     return (
       <Box key={`slot-${key}`} flexDirection="column">
         <Box key={`row-${key}`} flexDirection="row" alignItems="flex-start" columnGap={beside}>
@@ -379,7 +465,13 @@ export function deskView(props: DeskViewProps) {
           {hasDone(row) && pressBox({ ui, id: `done-${id}`, label: 'Done', onPress: () => actions.done(id) })}
           {row.row === 'pick' && pressBox({ ui, id: `change-${key}`, label: 'Change', onPress: () => actions.openRow(row) })}
           {row.row === 'pick' && pressBox({ ui, id: `ok-${key}`, label: 'OK', onPress: () => actions.keeperOk(row.pick.key) })}
+          {!stacks(row) && answers}
         </Box>
+        {stacks(row) && (
+          <Box key={`answers-${key}`} flexDirection="row" alignItems="flex-start" columnGap={beside}>
+            {answers}
+          </Box>
+        )}
         {said !== '' && (
           <Text key={`said-${key}`} color={app ? THEME.warn : LOOK.warn} wrap="wrap">
             {said}

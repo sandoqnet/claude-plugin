@@ -74,6 +74,8 @@ export type SeatProps = {
   // The rows the rest of the card may take (order P1: nothing scrolls) and the page of its words: the body pages inside the card, the ask and
   // the picks stay where they are. With none the body is drawn whole.
   text?: { room: number; page: number; onPage: (page: number) => void }
+  // His chat with the keeper on this card (views/chat.tsx): its elements stand in the rest of the card, between the words and the ask. None draws no thread.
+  thread?: any[]
   // This session is the open seat of a joined room (order session open): two dim and bright lines above the card, the seat with "open here" in the accent
   // and a Shut, then what it wakes on and the last row, and the line of a wake that stopped or a submit that was refused when there is one. With none, no line.
   open?: { seat: string; last: string; note: string; onShut: () => void }
@@ -140,7 +142,7 @@ function kit(ui: Ui, surface?: string, columns?: number) {
 // line is left out. Every key carries the card and the ask. In the terminal the same lines are a column in LOOK's theme
 // keys with string labels, no hover and no hex. The CLI host cannot draw the app branch. Returns the elements to sit
 // among the children of the pane.
-export function seatView({ ui, surface, seat, isHere, waits, others, answered, folds, actions, plan, columns, leanKey = true, part = 'whole', text: paging, open }: SeatProps) {
+export function seatView({ ui, surface, seat, isHere, waits, others, answered, folds, actions, plan, columns, leanKey = true, part = 'whole', text: paging, thread = [], open }: SeatProps) {
   const { Box, Text, Button, Input } = ui
   const { app, dim, accent, warn, ok, ink, wrap, card, link } = kit(ui, surface, columns)
   const width = plan?.width
@@ -377,13 +379,15 @@ export function seatView({ ui, surface, seat, isHere, waits, others, answered, f
           {kids}
         </Box>
       )
-    const stands = [textBox(body), ...ask]
+    // His chat with the keeper stands between the words and the ask (order keeper chat): it is measured with the ask, which the words give way to.
+    const under = [...thread, ...ask]
+    const stands = [textBox(body), ...under]
     if (!app || paging === undefined || width === undefined || lines.length === 0) return [card(`seat-wait-${at}`, stands, width)]
     // The body pages inside the card where the card passes the rows it has: the rows the card takes without the words, and what a block of words
     // adds to it (the gap), are measured as the pane measures, then the words are cut by the cells of the card into rows and paged.
     const names = namesOf(ui as any)
-    const base = sizeOf(card('x', ask, width), width, names).h
-    const gapRows = sizeOf(card('x', [textBox([<Text key="x">x</Text>]), ...ask], width), width, names).h - base - 1
+    const base = sizeOf(card('x', under, width), width, names).h
+    const gapRows = sizeOf(card('x', [textBox([<Text key="x">x</Text>]), ...under], width), width, names).h - base - 1
     const cells = innerOf(width, columns)
     const rowsOf = lines.flatMap(line => wrapRows(line, cells)).map(row => (row === '' ? ' ' : row))
     const room = paging.room - base - gapRows
@@ -404,7 +408,7 @@ export function seatView({ ui, surface, seat, isHere, waits, others, answered, f
             </Box>
             {shown.pager}
           </Box>,
-          ...ask,
+          ...under,
         ],
         width,
       ),

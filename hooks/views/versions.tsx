@@ -1,4 +1,6 @@
 import type { Busy } from '../model/discacts'
+import { RESTART_CLAUDE, isPaneRestart, restartLines } from '../model/steps'
+import type { Step } from '../model/steps'
 import { isApp } from './glass'
 import { LOOK } from './look'
 import { LAYER_MAX, SPACE } from './space'
@@ -23,7 +25,9 @@ const UPDATING = 'Updating the pane'
 export type CheckResult = { name: string; head: string; lines: string[]; plain: string }
 
 // What the update of the pane said: the lines of its process whole, and one plain line when it ended, was refused or did not answer.
-export type UpdateResult = { state: 'rest' | 'updating' | 'done'; lines: string[]; plain: string }
+// `pane` is the pane's step of the run when it printed one: a step in the state restart is drawn as a call to action, from its fields
+// (model/steps.ts restartLines), and its own line is not among `lines`.
+export type UpdateResult = { state: 'rest' | 'updating' | 'done'; lines: string[]; plain: string; pane?: Step }
 
 // The card of Versions in Settings. At rest it says at once, with no process, the pane's version and each disc of the room with its
 // version. "Check now" runs the two checks (the register's: sandoq update and sandoq room update, each with the word --check, so
@@ -89,9 +93,10 @@ export function versionsView({ ui, surface, edge = THEME.line, width: given, pla
   const strong = undefined
   const wraps = app ? ({ flexWrap: 'wrap', rowGap: SPACE.line } as const) : {}
 
+  // The names column is the default ink, as the versions are: a name is what he reads the line by, so it is never the dim key.
   const row = (key: string, name: string, version: string) => (
     <Box key={key} flexDirection="row" justifyContent="space-between" columnGap={app ? SPACE.control : 2} {...wraps}>
-      <Text color={dim}>{name}</Text>
+      <Text color={strong}>{name}</Text>
       <Text color={strong}>{version}</Text>
     </Box>
   )
@@ -101,7 +106,7 @@ export function versionsView({ ui, surface, edge = THEME.line, width: given, pla
   const offered = update !== undefined && card.onUpdate !== undefined && card.cannot === '' && !updating
   const paneRow = (
     <Box key="versions-pane" flexDirection="row" justifyContent="space-between" columnGap={app ? SPACE.control : 2} {...wraps}>
-      <Text color={dim}>Pane</Text>
+      <Text color={strong}>Pane</Text>
       <Box key="versions-pane-version" flexDirection="row" columnGap={app ? SPACE.control : 2} {...wraps}>
         <Text color={strong}>{card.pane}</Text>
         {updating && (
@@ -116,16 +121,24 @@ export function versionsView({ ui, surface, edge = THEME.line, width: given, pla
   // The app's lines form holds the pane alone: the discs stand once, in What it plays. The terminal keeps its rows.
   const rows = [paneRow, ...(app ? [] : card.discs.map((disc, i) => row(`versions-disc-${i}`, disc.name, disc.version === '' ? 'none' : disc.version)))]
 
-  // What the update said, under the rows: its lines whole, then its one plain line.
+  // What the update said, under the rows: where the pane waits for a new session, the call to action drawn from its fields (the line
+  // in the default ink, the move note under it dim); then the other lines of sandoq whole, then its one plain line (which is left out
+  // where the call to action says it).
+  const doing = update?.pane !== undefined && isPaneRestart(update.pane) ? restartLines(update.pane) : []
   const updated =
     update?.state === 'done' ? (
       <Box key="versions-updated" flexDirection="column">
+        {doing.map((line, i) => (
+          <Text key={`update-do-${i}`} color={i === 0 ? strong : dim} wrap="wrap">
+            {line}
+          </Text>
+        ))}
         {update.lines.map((line, i) => (
           <Text key={`update-line-${i}`} color={dim} wrap="wrap">
             {line}
           </Text>
         ))}
-        {update.plain !== '' && (
+        {update.plain !== '' && !(doing.length > 0 && update.plain === RESTART_CLAUDE) && (
           <Text key="update-plain" color={strong} wrap="wrap">
             {update.plain}
           </Text>

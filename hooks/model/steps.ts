@@ -53,11 +53,11 @@ export function readSteps(out: string): Read {
 }
 
 // The lines form of an out, for a card that draws lines and not a table (the terminal's): each step is its own `line`, the bytes the
-// lines form of sandoq prints for it, and any other line stands as it was.
-export const stepLines = (out: string): string[] =>
+// lines form of sandoq prints for it, and any other line stands as it was. A step the card says in its own words (`skip`) leaves no line.
+export const stepLines = (out: string, skip?: (step: Step) => boolean): string[] =>
   out.split('\n').flatMap(raw => {
     const read = readSteps(raw)
-    return read.steps.length > 0 ? [read.steps[0]!.line] : read.plain
+    return read.steps.length > 0 ? (skip?.(read.steps[0]!) === true ? [] : [read.steps[0]!.line]) : read.plain
   })
 
 // The groups of a state. Only the states the README says as a wait, a stop, a quiet or a current one are grouped; every other state is
@@ -220,6 +220,15 @@ export function afterLine(run: Step[]): string {
   if (steps.some(step => step.after === AFTER.restartRoom || step.state === 'started')) return DOOR_STARTED
   return ''
 }
+
+// THE PANE AFTER ITS UPDATE (state restart): the card says what to do, from the fields alone (state, here, and the move note), and not
+// the line of sandoq, which holds the inner steps of the move (marketplace remove, add at the tag, install). `here` is the version now
+// installed. The move note came when the why or the line of the step says the pane moved: then, and only then, a short second line.
+export const isPaneRestart = (step: Step | undefined): boolean => step !== undefined && isPane(step) && step.state === 'restart'
+const MOVE_NOTE = /\bmoved to\b|\bset again\b/i
+export const OPTIONS_AGAIN = "Options set by hand are set again in the plugin's settings."
+export const updatedLine = (step: Step): string => (step.here === '' || step.here === 'none' ? 'Updated.' : `Updated to ${step.here}.`) + ' Open a new Claude session to use it.'
+export const restartLines = (step: Step): string[] => [updatedLine(step), ...(MOVE_NOTE.test(`${step.why} ${step.line}`) ? [OPTIONS_AGAIN] : [])]
 
 // The pane's two versions: `here` of the pane's step is the version INSTALLED, the pane's constant is the version LOADED. The entry's
 // here column holds the LOADED version alone (`text`); when they differ the dim line under the entry (`note`) says both, in one

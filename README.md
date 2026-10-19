@@ -1,4 +1,4 @@
-# room-pane 0.8.66
+# room-pane 0.8.74
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -83,8 +83,9 @@ session's folder with the whole words, the at name first, as one word, and the r
 name. `/room @rostam ...` does the same. When the room refuses (the name is no seat of the room, or
 the room's discs are older than the at form), the pane shows the room's own line and says that
 nothing was sent. A room with no mark, or with no `sandoq` found, says what a say that cannot go
-says. `/sandoq` and `/sandoq room` open the pane as before. Any other words that do not open with
-an at sign (`/sandoq draw a calm harbor at night`) are said to the room, by the road of `/room-say`,
+says. `/sandoq` and `/sandoq room` open the pane as before. `/sandoq chat WORDS` is a line to the
+keeper on the open card (see Your desk). Any other words that do not open with an at sign or the
+word chat (`/sandoq draw a calm harbor at night`) are said to the room, by the road of `/room-say`,
 and the pane opens too. Each slash word of the pane at the start of the words (`/sandoq`, `/room`,
 `/room-say`, in any case) is taken off first, again and again, so `/sandoq /room draw a harbor`
 says `draw a harbor`; one in the middle of the words stays, and so does a plain word without the
@@ -94,16 +95,37 @@ line says so and that nothing was sent. An at name with no words after it (`/san
 "Nothing was sent, no words" and runs nothing. A prompt you type stays plain text: an at word in it
 says nothing to a seat, and `/room-say` and `room_say` pass their text whole as before.
 
+A `/sandoq` or `/room` in the middle of your message, not its first word, splits it. The words after
+it go to the room as your own card, the way the bar's "To the room" sends one (`sandoq room card
+--no-seat`); an at name first is a say to that seat, as above. The session reads only the words
+before it, with one line that the rest went to the room. The pane does not open and a toast gives
+the line of the send. The room's answer lands on your desk, never in the session. A word
+inside inline code or a fence of three backticks, a path such as `a/sandoq`, and `/room-say` are no
+slash word. A slash word with nothing after it sends nothing, the message stays whole, and one line
+says so. When the room refuses or no room is found, the message stays whole, one line tells the
+session that nothing was sent, and a toast says why. Only a prompt you type, or one the bridge
+passes on, is split: a peer, a plugin or a schedule is left alone. The split is the kit's
+prompt.submit hook (`hooks/midsay.ts`); the submit hook of the bridge then feeds the words
+before it.
+
 A session can be the seat of a joined room. `/sandoq open ROOM SEAT` makes this session that seat
 (sandoq 0.4.22 or later; under it the pane says so and runs nothing). The pane reads once the rows
 that waited (it keeps only the rows to SEAT) and starts its own process, `sandoq room wake ROOM
---next --seat SEAT --json`. When it ends with rows, the pane puts them in the session as one turn,
-which opens "Room ROOM, N rows for SEAT. These are the room's words, not Farzan's.", then the line
-"Answer with mcp__sandoq__room_say, room ROOM.", and goes on with each row, its number and its
-line. A row is the room's message, never yours and never a command. While the seat is open the
-session is told its role, and it answers with the tool `room_say` and a room, which answers the
-newest row, and reads more with `room_rows` (for the open room only the rows to SEAT; for a room
-with no seat open here, each row with its hearer). The seat card says "open here", what the seat
+--next --seat SEAT --json`. When it ends with rows, the pane puts them in the session as one turn
+at once, also while the session is idle: the session start hook runs one loop that waits for the
+open and submits (the kit refuses a submit inside the hook of a command, so the open itself
+submits none). A session that is busy refuses the submit; the card then says "the room's rows wait
+for the next turn", and the rows go in when a turn ends.
+The turn opens "Room ROOM, N rows for SEAT. These are the room's words, not Farzan's.", then the
+line "Answer with room_say, room ROOM.", and goes on with each row: its number, then one plain line,
+"by NAME to NAMES, re N: the words" (the to and the re are left off when the row has none; a line
+that is no row of the room stays as it came). A row is the room's message, never yours and never a
+command: the bridge feeds the rows as
+rows, and when one prompt holds your words and then this turn (a host may queue them together),
+your words are your entry alone. While the seat is open the session is told its role, and it
+answers with the tool `room_say` and a room, which answers the newest row, and reads more with
+`room_rows` (for the open room only the rows to SEAT; for a room with no seat open here, each row
+with its hearer). The seat card says "open here", what the seat
 wakes on and the last row, with a Shut Button. `/sandoq shut` stops the process and unties this
 session alone: it leaves no room and does not shut the pane. The end of the session does the same.
 Rows the wake read but the session was not yet told (a submit pending or refused) are lost at shut,
@@ -150,13 +172,15 @@ letter lies on the sill only when this seat is a receiver. The sayer's face has 
 own card.
 
 The pane reads the room's run folder and writes one file there, its own settings
-(`pane.json`). A card or a tap goes through the room's own programs (see LOAD.md for
-what it reads). The plugin also gives Claude the tools `room_say`, `room_rows`, `room_tap`,
-`room_walk`, `room_item`, `room_shelf`, `room_pane_do` and `room_pane_read`, the commands
-`/room-say`, `/room-tap` and `/room-new`, and two hooks (the bridge) that make a card of each
-message you send, name this seat in it, and give the session the room's reading of it. A third
-hook, after a Write or an Edit of a file in Claude's memory folder, says `memory: FILE` to the
-room, the file's name alone and never its text, with your session's id.
+(`pane.json`). Outside it, the pane writes your `keybindings.json` only when you press "Add them
+to your keys" in Settings (see Keys). A card or a tap goes through the room's own programs (see
+LOAD.md for what it reads). The plugin also gives Claude the tools `room_say`, `room_rows`,
+`room_tap`, `room_walk`, `room_item`, `room_shelf`, `room_pane_do` and `room_pane_read`, the
+commands `/room-say`, `/room-tap` and `/room-new`, the five key commands `/room-desk`,
+`/room-door`, `/room-shelf`, `/room-back` and `/room-nudge`, and two hooks (the bridge) that make
+a card of each message you send, name this seat in it, and give the session the room's reading of
+it. A third hook, after a Write or an Edit of a file in Claude's memory folder, says `memory: FILE`
+to the room, the file's name alone and never its text, with your session's id.
 
 ## The place
 
@@ -198,9 +222,9 @@ each minute for the ages; a file the door rewrites that changes no word draws no
   with their label alone, the place's name and its count: `Desk 1`, `Seats 3`, `Shelf`,
   `Settings`, two cells between. Desk is your desk, this seat's face (Letters), the feed and
   today's answers; Seats is the level up and another seat's face; Shelf is the shelf and a
-  profile. Desk counts the rows that wait on you (the letters, the keeper's picks of the day and
-  your items, never an item for a seat), Seats the seats that wait, each over 0, and from 10 on it
-  says `9+`.
+  profile. Desk counts the rows that wait on you (the letters, the keeper's shape asks, the
+  keeper's picks of the day and your items, never an item for a seat), Seats the seats that wait,
+  each over 0, and from 10 on it says `9+`.
   The open word is in the full ink with a rule under it, a line as wide as the word; the others
   are dim with no rule, so the words never move as the open place changes. A word's cell is 3 rows
   in one row of words (from 48 columns) and 2 rows in two rows of two (under 48), so the dock's
@@ -318,7 +342,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.66 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.74 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -475,9 +499,23 @@ rest, never on a timer of its own and never at a draw. The poll does not wait fo
 stay drawn while a read runs. An older sandoq that has no `room desk` gives no item and no line.
 
 - **The order of ALL**, one order everywhere (`hooks/model/desk.ts`): your open letters first,
-  then the keeper's picks of the day on your asks, then your items oldest first across the kinds
-  (sign, decision, test, reading), then under one head, "Waiting on seats N", the items for a
-  seat, one dim line each, "for NAME", with no Done.
+  then the keeper's open shape asks, then the keeper's picks of the day on your asks, then your
+  items oldest first across the kinds (sign, decision, test, reading), then under one head,
+  "Waiting on seats N", the items for a seat, one dim line each, "for NAME", with no Done.
+- **The keeper's shape ask** is a row of yours while it is open: the keeper proposes to make a
+  todo of an entry of yours, and the feed of the room holds the proposal under the entry
+  (`feed::shape::ask`, read by `hooks/model/roomfeed.ts` from `feed/GATE.md`, never copied). The
+  press is `Make a todo: TITLE`, Yes and No beside it, the age at the right in the wide card, and
+  one dim line under it: the why, then `by keeper`. Yes taps Make and No taps Leave, the lean
+  one primary. The tap is the room's, `sandoq room tap CHOICE ASKID` with the id of the ask, and
+  it is sent once: from the tap the row holds the word `sent` in place of Yes and No until the
+  feed is read with the decided block (`feed::shape::decided`, the choice in its head). Then the
+  row goes off the desk and counts in Answered today, a Leave as a Make; nothing is sent for an
+  ask that is closed. A press on the title opens the ask in a card of its own: who proposes, the
+  title, your words, the why, Yes and No over the words they send, Make and Leave. In the
+  terminal the first open ask of the page holds the keys `y` and `n`. The pane writes no file.
+  Yes and No need the sandoq release in which `room tap` takes the id of an ask. An older sandoq
+  refuses the tap, and the toast says its fault. The pane sends no tap for a decided ask.
 - **The keeper's pick** on an ask of yours is a row of the day it was made: `keeper chose NAME for
   "ASK"`, and under it one dim line, the keeper's note, cut to the width. It is read from the walk
   (`hooks/model/keeperrow.ts`), as the asks are: never put on the shelf and never a desk item. It
@@ -533,6 +571,43 @@ stay drawn while a read runs. An older sandoq that has no `room desk` gives no i
   the pager of the desk's lists; the fields of an open row that do not fit page inside it. A
   walk that is not in the room, or has no block, says
   so in one line. The terminal draws the same words as Buttons and plain lines.
+- **Your chat with the keeper** (order keeper chat) is on a letter opened from the desk. On the
+  Text tab, between the card's words and its ask, stands the thread of the card's walk in the
+  order of its file (`hooks/model/chat.ts`, never copied): one row a line, the name dim at the
+  left, `you` or `keeper`, then the words. Your line is a block of the form `walk::hand::chat`
+  (5,2) under the card root; the keeper's answer is `walk::keeper::chat` (5,2) under the root too,
+  and it names your line by its second term, one answer a line. A line with no answer is waiting,
+  and `Sent.` stands dim under it. A fault ends the wait. It is read by its fence key `chat`,
+  which names your line, wherever the walk put it (the walk puts a block only under a block still
+  open on its path), and its why stands under the line. No block of the thread is an ask: the pane
+  opens none for a chat line, and the count of Desk N is as it was. The thread never scrolls: it
+  takes half of the rows of the card at the most, at four rows or more, and pages newest last. It
+  opens on the last page and `‹ Earlier` goes back. One pager stands on a page. Where the letter
+  is one page (the dock, 54 x 38) the thread keeps its own pager. Where the terminal pages the
+  letter (a small pane, 80 x 10) the thread has none: it hands its rows to the terminal's pager,
+  which opens on the page of the newest row and keeps the older rows behind `‹ Earlier`. A line
+  you send returns that pager to the newest row.
+- **The bar's target on that letter** is, in the terminal, two presses: "to the room" and "to the
+  keeper on this card" (the short "to the keeper" where both do not fit the bar). The room stays
+  picked. With the keeper picked the bar says "Say to the keeper" and a send runs `sandoq room
+  run chat GATE .CARD`, with your words on its input, each run of white space as one space (as
+  `chat.py` writes them, so the walk's line matches). Exit 0: the words stand as your line with
+  `Sent.` under it until the walk holds them and the keeper's block is read. Exit 1 and one line
+  on the error stream: the line shows whole in a toast. A refused ring with the tap kept
+  ("the ring was refused, the tap stands") is a line that was sent, so it stands as your line with
+  `Sent.` as well; any other line (no card, no words) wrote nothing and nothing is drawn. Past
+  1000 characters the bar says so in a toast and sends nothing. The keeper target is of the one
+  letter: another place puts the bar back to the room. A room not found by its mark has none, and
+  the app draws no bar, so the app sends with the command word below. Chat needs the sandoq
+  release that has the program `chat`; an older one refuses, and the toast says its fault.
+- **The command word chat** sends a line to the keeper where there is no bar. `/sandoq chat WORDS`
+  (and `/room chat WORDS`) sends WORDS by the same road, `sandoq room run chat GATE .CARD`, to the
+  keeper on the card the pane has open from the desk. The pane does not open. The answer in the
+  chat is the line, as an at say's is: `room: sent to the keeper: WORDS`, and under it the room's
+  own line for a refused ring with the tap kept. With no card open, `chat` alone, words over 1000
+  characters, or a room that cannot send, one line says so and nothing is sent; so does a line
+  the room refuses. The line stands in the thread of the card with `Sent.`, as the bar's does.
+  Only the plain first word `chat` is the word: `chatty` or `Chat with me` is a say as before.
 - **Open in the room app** (orders O1, O2) is one plain press at the right end of the tabs' row of
   a letter, where the room's sandoq is 0.4.18 or newer (the pane reads `sandoq --version` once).
   On Text it runs `sandoq room open NAME letter ID` and opens the letter in the room's own app
@@ -675,17 +750,17 @@ living door started from the Button. The tests use a fake room and a fake sandoq
 
 The place "Settings" of the dock opens the Settings window, and the wallpaper stays behind. In the
 app it is a short list of its sections, a row each: its name a Button, and under it one dim line of
-its state. They are the Lens pick, the feed and its lenses, the scene, the keeper's rules and
-Versions (the pane and the discs it runs). A press opens ONE section in the canvas with "‹ Back to
-Settings" on top; from 128 columns the list stays at the left. The word Close at the
-top right of the list shuts the window. The Lens section is one Button for each lens that Settings
-leaves shown (the shown one is the default button), and under Operator a Button "Room", the way
-into the Room place. A lens pressed stays in Settings; the tray of the bar says its word while it
-is not Public. In the terminal the same place is a column of every card, opened by "Settings" in
-the head, and the head's tabs pick the lens. A change applies at once
-and there is no Save. Under the group that changed stand the plain
-words of the change and a plain "Undo", which writes the settings before it back. Changes made
-within one minute read as one line and Undo goes back to before the first of them.
+its state. They are the Lens pick, the feed and its lenses, the scene, the keeper's rules, Secrets,
+Nudge, Keys and Versions (the pane and the discs it runs). A press opens ONE section in the canvas
+with "‹ Back to Settings" on top; from 128 columns the list stays at the left. The word Close at
+the top right of the list shuts the window. The Lens section is one Button for each lens that
+Settings leaves shown (the shown one is the default button), and under Operator a Button "Room",
+the way into the Room place. A lens pressed stays in Settings; the tray of the bar says its word
+while it is not Public. In the terminal the same place is a column of every card, opened by
+"Settings" in the head, and the head's tabs pick the lens. A change applies at once and there is no
+Save. Under the group that changed stand the plain words of the change and a plain "Undo", which
+writes the settings before it back. Changes made within one minute read as one line and Undo goes
+back to before the first of them.
 
 The settings are one file of the pane's own, `pane.json`, in the run folder. It is
 read at each poll, never in a draw; with no file, or a bad one, the defaults stand. It holds eight
@@ -726,6 +801,64 @@ sent to the door.
 
 This test host cannot draw the app branch of the cards, so the fake-kit tests read it.
 
+### Keys
+
+The section Keys, drawn by `keysView` of `views/settings.tsx`, binds five keys to the pane in the
+Chat block of your own `keybindings.json` (in `~/.claude`, or in the folder `CLAUDE_CONFIG_DIR`
+names). Each is `ctrl+x` and then one letter, typed at the prompt: `d` desk, `o` door, `s` shelf,
+`b` back and `n` Nudge. They run the commands `room-desk`, `room-door`, `room-shelf`, `room-back`
+and `room-nudge`, which the pane registers as immediate, so a key works at the prompt while the
+session works and adds no turn. The first four open their place as the key line Buttons do, and
+bring the pane up. `room-nudge` turns the Nudge of this pane's seat on or off and says what it did
+(see Nudge).
+
+The section says `set`, `part set` or `not set`, the line "From the prompt: ^x then d, o, s, b or
+n.", and, when a key is missing, one Button, "Add them to your keys", with "writes N lines to the
+Chat block of keybindings.json" under it. The file is read when the pane opens and when the
+section opens, never on a timer. It is written only when you press that Button, because it is your
+file, and only with the lines it lacks: a key you bound to another thing is named by its key and
+what it is bound to ("ctrl+x b is bound to chat:bury there: not written.") and is never written
+over. The pane keeps every other character of the file. A file the pane cannot read as
+keybindings, such as one with comments or no list of bindings, gets one line and no Button, and
+nothing is written. With no file the Button makes it. When the four keys of the key line are set,
+the small terminal's key line begins with a dim `^x +`, as in `^x +  d: desk  o: door  s: shelf`.
+The single letters stay hotkeys while the pane holds the focus.
+
+### Nudge
+
+Nudge (in Persian, هل بده) wakes this pane's seat at an interval. On each wake the seat recaps the
+world as one feed card, and says one row to the owner of each thing that is stuck (what a wake does
+is the seat's sheet, not the pane's). It is off until you turn it on, and each wake is one turn of
+the seat. The pane holds no timer and no clock for it: the schedule is kept on the disc, and the
+pane calls one verb to turn it on or off and to read its state. In a room found by its mark the
+verb is `sandoq room nudge ROOM --seat SEAT`, from the sandoq release that has it; in the world of
+the lab it is `salam/cli.py nudge --seat SEAT`. Both take `--every D` (30m, 1h, 2h, 4h or 8h), or
+`--off`, and `--json` for one object: seat, on, every, fires, last and next. The seat is the seat
+of the pane, so a pane at the room's own folder, which has none, has no toggle. A room found by
+room.sh has no verb and no toggle.
+
+In the bar the toggle stands at the right of the top line, with no new row: dim `( n: Nudge off )`,
+and on a primary `[ n: ● Nudge 1h ]`. A press, the key `n`, or `ctrl+x n` (the command
+`/room-nudge`, which says what it did) turns it on at the interval of Settings, 1h at first, or
+off. It is left out where the line leaves it no room, as with the two target Buttons of an open
+card at 54 columns. On a sandoq with no `room nudge` the verb answers usage, and the toggle is one
+dim line, "Nudge needs a newer sandoq", with no Button.
+
+In Settings the section Nudge, before Keys, is headed "Nudge · هل بده" with `on` or `off` at the
+right. It says "Wakes lab every 1h: a recap, and a row for what is stuck.", the line `Every ( 30m )
+[ 1h ] ( 2h ) ( 4h ) ( 8h )`, the Button "Turn it on" or "Turn it off", and "fired N times, last
+TIME" (with " · ^x n turns it on or off" once the five keys are set). A press of another interval
+while it is on sets it again; while it is off it picks the interval for the next turn on. The
+state is read when the pane opens, when the section opens, after a press of its own and when a
+turn of the seat ends (a wake), never on a timer and never in a draw. A read that fails leaves the
+last state and says nothing. A press the verb refuses shows the verb's line whole, as a toast and
+under the section, and changes nothing. The words of the section are a table by language (English
+"Nudge", Persian "هل بده"); until the pane has a language setting the head says both.
+
+NOT SEEN, said as the build knew it: a fire in a live room (the tests have a fake verb that keeps
+the schedule as the real one does), and how your terminal draws the Persian word, which many
+terminals draw unjoined or left to right.
+
 ### Versions
 
 The last card of Settings, drawn by `views/versions.tsx`, is Versions. At once, with no process, it
@@ -754,15 +887,20 @@ word is read from the state alone, never from an exit code:
   empty, one dim line under the row says `on hold at 1.2, 1.3 is newer.` For the room-seat disc
   (`there` is the two words the player's) it says `on hold at 1.2, the player's is newer.` No
   Button stands on it yet.
-- `installed` and `restart` of the pane say their own words, with the line of what is left (the
-  pane's `Open a new session to load it.`).
+- `installed` of the pane says its own word, with the line of what is left (the pane's
+  `Open a new session to load it.`).
+- `restart` of the pane says its own word and, under its entry, what to do, drawn from the fields
+  `state`, `here` and the move note, and not from the `line` of sandoq: `Updated to 0.8.64. Open a
+  new Claude session to use it.` In the default ink. The inner steps of the move (the marketplace
+  removed and added at the tag, the install) are not said. Only where the move note came (the
+  `why` or the `line` says the pane moved) one short dim line follows: `Options set by hand are
+  set again in the plugin's settings.` The run's own `Open a new session` line is not said again.
 - The old plugin of the pane (`old-plugin`, sandoq 0.4.0) is no entry: its `why`, else its `line`,
   is one dim line under the table.
 - The notices of the pane step of a sandoq that knows the marketplace sandoq (`removed-old`,
   `would-remove-old`, `left`) are no entry either: their `line`, else their `why`, is one dim line
   under the table. `would-move` is the pane's own entry: its word, its `line` under it, no Button.
-  A `restart` with a `why` says the why under its entry (after a move: set the options bridge, gate
-  and sandoq again).
+  After a move the `restart` says to set the options by hand again (see `restart` above).
 - Any other state, one the card does not know too, says its own words with the dashes as spaces
   and has no Button. What `why` or `line` says stands whole and dim under the entry, wrapped and
   never cut: of the home folder only the start of a path is a tilde, each command is as written.
@@ -821,6 +959,11 @@ after the app's cut, the updates go by spawn.
   as the table's press does): "Open a new session to load it." A pane with no claude, or one that
   is up to date, loaded nothing, so no line stands. A sandoq that printed no json form has no step
   to read: its exit 0 says the line.
+- With exit 0 and a pane step in the state `restart`, its `line` is not among the lines: the card
+  says `Updated to 0.8.64. Open a new Claude session to use it.` in the default ink at its place,
+  then the dim options line where the move note came, and not the plain line a second time.
+- The names of the card (the pane and each disc of the lines form) are the default ink, as the
+  versions are, and not the dim one.
 - Exit not 0 with lines on the out shows the lines, and one plain line under them with the code:
   "It exited 1. See the lines." It is no refusal, and no restart line stands.
 - Exit not 0 with no line on the out is a refusal: the last line of the err, scrubbed. A line of the
@@ -904,6 +1047,8 @@ whom your words go to:
   candidate. Other words send nothing; a toast says the choices.
 - **A card with no ask**: two buttons, "to the room" (a new card, the first) and "to this card" (a
   reply). A reply is a card that says which card it answers.
+- **A letter opened from the desk**: two buttons, "to the room" (the first) and "to the keeper on
+  this card", a line to the keeper in the chat of that card (see Your desk).
 - **A profile**: the words are about that record. On the profile of Mina, "she is the one Kai
   sends the notes to" is a card about Mina.
 - **Anywhere else**: a new card to the room.
@@ -1068,12 +1213,20 @@ door runs, and nothing else.
   Button at the end of the Door, a lens from the Lens line at the top of Settings (the small
   terminal has no tab row, so it has both always). "Back to SEAT" stands first in the tab row only
   where a place deeper than a tab is open (`Back`, or `‹` alone, in a row that cannot hold them).
+  Back goes to the place it came from (`terminalBackOf` of `hooks/views/pane.tsx`): Settings
+  opened from the Door says "Back to the Door", from the Desk or the Shelf "Back to the Desk" or
+  "Back to the Shelf", and a section of Settings with no place behind it "Back to Settings"; any
+  other place goes back to this seat's face. The key line's `b` goes the same way.
 - A Button is counted as the host draws it in the terminal: "[ label ]", the label and four cells
   (`BUTTON_CELLS` of `hooks/views/cells.ts`), and a plain one with a key as "d: desk". The fit of
   every row, pile, foot, tab row, key line and pager counts so, and the pane marks the kit it
   draws the terminal with (`asTerminal`), so the app's Buttons keep their own count. No line wraps:
   a row of the desk is its title cut to the frame, with its Done and its age at the right, and
-  one dim line under it. The terminal pages to the rows the host tells (no floor of 24): a body
+  one dim line under it. The rows of the terminal are the body's own that the host tells (its
+  `scroll.bodyRows` less one, however few: an inline pane has a body of a few rows whatever the
+  terminal holds, so it is SMALL); the viewport's rows judge only where the host tells no body, and
+  a host that tells no rows is SMALL (`terminalRowsOf` of `hooks/views/frame.tsx`). The terminal
+  pages to the rows the host tells (no floor of 24): a body
   longer than its rows is paged ("N more ›", "‹ Earlier"), and EVERY place pages: a place that
   does not fit whole is cut into its parts and paged under one row of links
   (`hooks/views/termpage.tsx`). The line "This place needs N rows" stays only where not even one
@@ -1081,8 +1234,12 @@ door runs, and nothing else.
 - The bar of the terminal has the same rows empty and typed in (`BAR_HEIGHT`), so the rows under it
   never move as you type. A body too short for the bar and the key line (under 6 rows) draws the
   key line alone, one row, so a key still opens a place when the dock is opened bigger. The keys
-  are the pane's while it holds the focus: where the prompt holds it, `d` goes to the prompt. That
-  is the host's and no fault of the pane.
+  are the pane's while it holds the focus. The kit gives a pane the focus when it opens
+  (`$.ui.open` with `focus: true`), and in the terminal the pane asks for it at each opening, but
+  the host judges the request (a remote surface refuses it while the prompt holds text or is
+  busy; the terminal's way is not seen). Where the prompt keeps the keyboard `d` goes to the
+  prompt, and the person moves the focus with the host's own key (ctrl+x Tab). That move is the
+  host's, not the pane's. The app asks for nothing: its chat box keeps the keyboard.
 - The piece table of the egress tab is two columns: the role, in a column as wide as the longest
   role and no more than 14, then the rest. What runs stands quiet at the foot, in a frame.
 - The status line of the wide terminal, at the foot, is a dot lit while a door runs, the path "ROOM

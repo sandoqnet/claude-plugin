@@ -34,6 +34,7 @@ import {
 } from './bridge.ts'
 import type { Ask, FeedKind, FeedRow, Ran, Room } from './bridge.ts'
 import { newestIds } from './model/shelf.ts'
+import { turnStartIn } from './model/sessionseat.ts'
 
 const PROCESS_MS = 8000
 
@@ -142,9 +143,32 @@ function rows(raw: string): void {
   if (!input || isBridgeOff(process.env)) return
   const cwd = input.cwd || process.cwd()
   const room = findRoom(cwd)
-  const turn = turnRowsOf(input.prompt)
+  const turn = turnRowsOf(splitTurn(input.prompt).turn)
   if (!room || turn === undefined) return
   for (const row of turn) feed(room, 'row', row.line, cwd, input.session, { sayer: row.sayer, seq: row.seq }, FEED_MS)
+}
+
+// The pane's turn in a prompt, and his words before it. A prompt that opens with a head is all turn; else the head of the pane's own turn, whole, at the start
+// of a later line cuts the prompt (a host that queues what a turn waits on hands one prompt, his words first): his before it, the room's rows from it.
+function splitTurn(prompt: string): { his: string; turn: string } {
+  if (turnRowsOf(prompt) !== undefined) return { his: '', turn: prompt }
+  const at = turnStartIn(prompt)
+  return at < 0 ? { his: prompt, turn: '' } : { his: prompt.slice(0, at).trim(), turn: prompt.slice(at) }
+}
+
+// His words: ONE entry, kind his, the words the whole input. The door may make a card of it, and then its word is on the out and its reading
+// is waited for as ever. With no word the session gets no context, or ONE line: the entry waits on the feed (exit 1), or the room did not take it.
+function hisWords(room: Room, cwd: string, session: string, words: string): string {
+  const made = feed(room, 'his', words, cwd, session, undefined, FEED_MS)
+  const id = cardIdFrom(made.out)
+  if (id === '') return submitOutput(noCardContext(made))
+  let walk = ''
+  for (let waited = 0; waited <= WAIT_MS; waited += WAIT_STEP_MS) {
+    walk = read(walkPath(room, id))
+    if (isReadWalk(walk)) break
+    sleep(WAIT_STEP_MS)
+  }
+  return submitOutput(readingContext(words, walk, sessionAsks(room, session)))
 }
 
 function submit(raw: string): string | Promise<string> {
@@ -155,20 +179,11 @@ function submit(raw: string): string | Promise<string> {
   const cwd = input.cwd || process.cwd()
   noteSession(room, cwd, input.session)
   // A wake's turn is the room's rows, not his words, and every row must land: ONE detached child, `node hook.ts rows`, gets the turn on its
-  // input and feeds each row in order with no budget; this hook returns at once, with no wait and no context.
-  if (turnRowsOf(input.prompt) !== undefined) return startRows(raw).then(() => '')
-  // His words: ONE entry, kind his, the prompt the whole input. The door may make a card of it, and then its word is on the out and its reading
-  // is waited for as ever. With no word the session gets no context, or ONE line: the entry waits on the feed (exit 1), or the room did not take it.
-  const made = feed(room, 'his', input.prompt, cwd, input.session, undefined, FEED_MS)
-  const id = cardIdFrom(made.out)
-  if (id === '') return submitOutput(noCardContext(made))
-  let walk = ''
-  for (let waited = 0; waited <= WAIT_MS; waited += WAIT_STEP_MS) {
-    walk = read(walkPath(room, id))
-    if (isReadWalk(walk)) break
-    sleep(WAIT_STEP_MS)
-  }
-  return submitOutput(readingContext(input.prompt, walk, sessionAsks(room, input.session)))
+  // input and feeds each row in order with no budget; this hook returns at once, with no wait and no context. Words of his before the turn are his.
+  const { his, turn } = splitTurn(input.prompt)
+  if (turn === '') return hisWords(room, cwd, input.session, input.prompt)
+  const started = startRows(raw).then(() => '')
+  return his === '' ? started : started.then(() => hisWords(room, cwd, input.session, his))
 }
 
 function stop(raw: string): void {

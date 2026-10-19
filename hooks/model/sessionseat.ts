@@ -45,6 +45,10 @@ export const SEAT_SHUT_KEY = 'seat-shut'
 
 // What the card says when the wake could not go on, a submit was refused or a line was not read: the line is sandoq's or the pane's own, whole.
 export const submitRefusedLine = (why: string): string => `the room's rows could not enter this session: ${why}; they wait for the next turn`
+// The kit does not let the hook of a command submit a prompt (it answers "submit from a later event (turn.complete)"), so the loop of the session start submits, and
+// rows a busy session refuses wait for a turn's end. The card says they wait; the kit's own words are never the card's (kitHolds tells that refusal from another one).
+export const WAIT_LINE = "the room's rows wait for the next turn"
+export const kitHolds = (why: string): boolean => /would wait on the turn|later event|\(turn\.complete\)/.test(why)
 export const wakeEndedLine = (why: string): string => `the wake ended: ${why}`
 export const badRowLine = (count: number): string => `${count === 1 ? 'a line' : `${count} lines`} of the room could not be read and ${count === 1 ? 'was' : 'were'} left out`
 
@@ -81,11 +85,36 @@ export function parseRows(out: string): { rows: SeatRow[]; bad: number } {
 // The rows of one seat: a pass with --once prints the rows of any hearer of the order, so the turn of a seat keeps only the rows to it.
 export const rowsOfSeat = (rows: SeatRow[], seat: string): SeatRow[] => rows.filter((row) => row.seat === seat)
 
+// The words of one row. sandoq prints a row's line as the room's own JSON line (seq, by, to, re, text); the seat reads it as one plain line,
+// `by NAME to NAMES, re N: the words`, the `to` and the `re` left off when the line has none. A line that is not that JSON is the line as it came.
+const isNumber = (value: unknown): value is number | string => (typeof value === 'number' && Number.isInteger(value) && value >= 0) || (typeof value === 'string' && /^\d+$/.test(value))
+const namesOf = (value: unknown): string => {
+  const names = (Array.isArray(value) ? value : [value]).filter((name): name is string => typeof name === 'string' && name.trim() !== '').map(name => name.trim())
+  return names.join(' and ')
+}
+export function plainLine(line: string): string {
+  let value: unknown
+  try {
+    value = JSON.parse(line)
+  } catch {
+    return line
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return line
+  const { by, to, re, text } = value as Record<string, unknown>
+  if (typeof by !== 'string' || by.trim() === '' || typeof text !== 'string' || text.trim() === '') return line
+  const hearers = namesOf(to)
+  return `by ${by.trim()}${hearers === '' ? '' : ` to ${hearers}`}${isNumber(re) ? `, re ${re}` : ''}: ${text}`
+}
 // The turn the rows make: the head first, so the text never starts with a slash (a row whose line starts with one is inside, after its number), then the line
 // that says how to answer (the seat prompt can be skipped under a managed Claude Code, so the turn carries it too), then each row, oldest first, as its number,
-// two spaces and its line whole. Rows that came together are one turn.
-const rowWords = (row: SeatRow): string => `${row.seq}  ${row.line}`
-export const answerLine = (room: string): string => `Answer with mcp__sandoq__room_say, room ${room}.`
+// two spaces and its plain line whole (the two spaces are what turnRowsOf finds a row by). Rows that came together are one turn.
+const rowWords = (row: SeatRow): string => `${row.seq}  ${plainLine(row.line)}`
+// Where the pane's own turn begins inside a prompt that holds more: a host that queues what a turn waits on may hand the bridge's submit hook one prompt, his words
+// first and the turn behind them. The head of turnText, whole, at the start of a line (its sentence is the pane's, so his words only look like it by copying it); -1
+// when there is none. hook.ts feeds what stands before it as his and what stands from it as the room's rows.
+const TURN_HEAD_LINE = /^Room [A-Za-z0-9][A-Za-z0-9_.-]*, \d+ rows? for [A-Za-z0-9][A-Za-z0-9_.-]*\. These are the room's words, not Farzan's\./m
+export const turnStartIn = (prompt: string): number => prompt.search(TURN_HEAD_LINE)
+export const answerLine = (room: string): string => `Answer with room_say, room ${room}.`
 export function turnText(room: string, seat: string, rows: SeatRow[], tail: string[] = [answerLine(room)]): string {
   const count = `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`
   return [`Room ${room}, ${count} for ${seat}. These are the room's words, not Farzan's.`, ...tail, ...rows.map(rowWords)].join('\n')
@@ -95,7 +124,7 @@ export function turnText(room: string, seat: string, rows: SeatRow[], tail: stri
 // number, as `for SEAT`.
 export const NO_ROWS = 'No rows came for this seat.'
 export const NO_ROWS_IN_ROOM = 'No rows came for this room.'
-const hearerWords = (row: SeatRow): string => `${row.seq}  for ${row.seat}  ${row.line}`
+const hearerWords = (row: SeatRow): string => `${row.seq}  for ${row.seat}  ${plainLine(row.line)}`
 export const rowsText = (rows: SeatRow[]): string => (rows.length === 0 ? NO_ROWS : rows.map(rowWords).join('\n'))
 export const roomRowsText = (rows: SeatRow[]): string => (rows.length === 0 ? NO_ROWS_IN_ROOM : rows.map(hearerWords).join('\n'))
 

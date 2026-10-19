@@ -41,14 +41,16 @@ export type TerminalSize = 'small' | 'wide'
 export const terminalSize = (columns: number, rows?: number): TerminalSize => (columns < SMALL_COLUMNS || (rows !== undefined && rows < SMALL_ROWS) ? 'small' : 'wide')
 
 // The rows of the terminal's body, as the host tells them, with no floor (the app's paneRows never gives under 24, which no short terminal has):
-// the body's own rows less one when it gives 11 or more, else the viewport's less 6 and one, as paneRows reads them. None when the host tells neither.
-const BODY_LEAST = 11
+// the body's own rows (props scroll bodyRows) less one, WHATEVER they are. An inline pane has a body of a few rows whatever the terminal holds (the
+// lab's real capture of 0.8.66: at 80 x 26 the box held 6 rows, and the viewport's less 7 said 19, so the wide layout drew its tab row and no place
+// under it); the viewport is the whole surface, so it judges only where the host tells no body (its rows less 6 and one, as paneRows reads them).
+// None when the host tells neither.
 const SURFACE_FOOT = 6
 export function terminalRowsOf(surfaceRows: unknown, bodyRows: unknown): number | undefined {
   const count = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
   const body = count(bodyRows)
   const surface = count(surfaceRows)
-  const base = body !== undefined && body >= BODY_LEAST ? body : surface === undefined ? undefined : surface - SURFACE_FOOT
+  const base = body !== undefined ? body : surface === undefined ? undefined : surface - SURFACE_FOOT
   return base === undefined ? undefined : Math.max(1, base - 1)
 }
 

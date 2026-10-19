@@ -7,6 +7,8 @@ import type { Expanded, MoreWhat } from '../model/expanded.ts'
 import type { Lens } from '../model/feed.ts'
 import type { MotionRow, PendingTap } from '../model/motion.ts'
 import type { FeedEntry } from '../model/roomfeed.ts'
+import type { KeysCard } from '../model/keys.ts'
+import type { NudgeCard } from '../model/nudge.ts'
 import type { SecretsCard } from '../model/secrets.ts'
 import type { SettingKey, Settings } from '../model/settings.ts'
 import type { CatalogEntry, Disc } from '../model/shelf.ts'
@@ -81,7 +83,10 @@ export type Actions = {
   // and the open card. With none, the bar says to the room alone.
   reply?: (cardId: string, text: string) => void | Promise<void>
   about?: (recordId: string, text: string) => void | Promise<void>
-  setTarget?: (target: 'room' | 'card') => void | Promise<void>
+  setTarget?: (target: 'room' | 'card' | 'keeper') => void | Promise<void>
+  // His line to the keeper on a desk card (order keeper chat): the card's bare id and his words; `sandoq room run chat GATE .CARD` in a marked room. With none,
+  // the bar offers no keeper target.
+  chat?: (cardId: string, words: string) => void | Promise<void>
   // The Settings place: a setting changed to a value (it applies at once and is written to the pane's own file),
   // and the last change undone. With none, the place changes nothing.
   changeSetting?: (key: SettingKey, value: Settings[SettingKey]) => void | Promise<void>
@@ -134,6 +139,12 @@ export type Actions = {
   // takes no value and runs no set: a secret is set in a terminal or in the sandoq control panel.
   readSecrets?: () => void | Promise<void>
   showSecret?: (name: string) => void | Promise<void>
+  // The Keys section of Settings (order keys): "Add them to your keys" writes the missing lines to the Chat block of his keybindings.json. It is
+  // his tap alone that calls it; a key bound to another thing is never written over.
+  addKeys?: () => void | Promise<void>
+  // Nudge (order nudge pane): the bar's toggle turns it on at the picked interval or off; with an interval (the Every of Settings) it sets that one while on and
+  // picks it for the next turn on while off.
+  nudge?: (every?: string) => void | Promise<void>
   // The app's canvas (order D1): a press on the dock's open place shuts its window, and the pane is at rest again.
   shut?: () => void | Promise<void>
   // A list longer than the canvas turns its page in place (order D1, still A2): the list by its name, the page from 0. The register
@@ -242,8 +253,14 @@ export type PaneProps = {
   seatOpen?: { room: string; seat: string; last: string; note: string }
   // The offset of the clock from UTC, in minutes, the times of the trace face are said in.
   zone: number
-  // Where a say goes when the open card has no open ask: the room, or a reply to the open card.
-  target: 'room' | 'card'
+  // Where a say goes when the open card has no open ask: the room, a reply to the open card, or (on a letter opened from the desk) the keeper on that card.
+  target: 'room' | 'card' | 'keeper'
+  // The words he sent to the keeper that the walk does not hold yet, by the card's id (order keeper chat): each is drawn as his line, `Sent.` under it, until the
+  // walk holds a line of those words.
+  chatSent?: Record<string, string[]>
+  // The thread of a letter hands ALL its rows over, with no pager of its own (order chat pager): set by the terminal's pager when it pages the letter, which then
+  // pages the thread's rows with the rest and opens on the thread's last page.
+  chatWhole?: boolean
   // The pane's own settings, read from its file at each draw; none are the defaults.
   settings?: Settings
   // The plain words of the last change and the setting it changed (the Settings place shows them with Undo).
@@ -284,6 +301,8 @@ export type PaneProps = {
   roomOpen?: string
   // The room's feed (order room-feed, part A): the entries of feed/GATE.md with their answers, oldest first. The feed card of the room card lays them out.
   feed?: FeedEntry[]
+  // The keeper's shape asks he tapped (their ids) and whose decided block is not read yet: their Yes and No are held, one tap an ask (step 3 of the terminal pane).
+  shapeSent?: string[]
   // The room card (order DP, P4): the last two parts of the session's folder (its Folder row), what the last check of the discs gave
   // (its hour and each disc's state word, none before a check), and the nav the open place was opened from (the room card or none), so
   // a Back says where he CAME from.
@@ -294,6 +313,12 @@ export type PaneProps = {
   versionsCard?: VersionsCard
   // The Secrets card of the Settings place (order S2): the names sandoq lists and where each is kept, never a value. None draws no card.
   secretsCard?: SecretsCard
+  // The Keys card of the Settings place (order keys): what his keybindings.json says of the five keys. None draws no card.
+  keysCard?: KeysCard
+  // The five keys are set, so the key line of the small terminal shows its prefix, once and dim (order keys).
+  keysSet?: boolean
+  // The Nudge of the pane's seat (order nudge pane): the bar's toggle and the Nudge section of Settings read it. None draws no toggle.
+  nudgeCard?: NudgeCard
   // His desk (order DESK): what the last read of the items gave, drawn by the desk place, and counted by the dock and the tray at rest too.
   deskCard?: DeskCard
   // The keys of the keeper's picks he took off the desk by OK (order T3): a pick of these is no row.
@@ -385,7 +410,10 @@ export type CaptureProps = {
   card: Card | undefined
   asks: OpenAsk[]
   // Where a say goes when the open card has no open ask; none is the room.
-  target?: 'room' | 'card'
+  target?: 'room' | 'card' | 'keeper'
+  // The card of a letter opened from the desk that the bar can chat about (its bare id), '' or none for any other place: the bar then offers the keeper on this
+  // card beside the room, and a send to it is `actions.chat`.
+  keeper?: string
   // The catalog, for the name of the open profile.
   entries?: CatalogEntry[]
   // The host's surface: an app draws the composer on glass, anything else the terminal's bar.

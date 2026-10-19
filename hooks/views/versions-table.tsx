@@ -1,5 +1,5 @@
 import { UPDATE, runningWords } from '../model/discacts'
-import { ON_HOLD, RESTART_CLAUDE, groupOf, isNotAFault, isPane, labelOf, noteOf, oldPluginLines, orderedSteps, paneNoticeLines, paneStepOf, panePress, paneVersions, wordOf } from '../model/steps'
+import { ON_HOLD, RESTART_CLAUDE, groupOf, isNotAFault, isPane, isPaneRestart, labelOf, noteOf, oldPluginLines, orderedSteps, paneNoticeLines, paneStepOf, panePress, paneVersions, restartLines, wordOf } from '../model/steps'
 import type { Door, Step } from '../model/steps'
 import { SPACE } from './space'
 import { THEME, cellsOf } from './theme'
@@ -29,8 +29,9 @@ export type VersionsTable = {
   running?: { what: string; restart: boolean }
   // A refused run: its exit code and the last line of its err, scrubbed.
   refused?: { code: number; err: string }
-  // What a run said: ONE plain line by `after` and the lines of sandoq, folded until he asks.
-  said?: { plain: string; lines: string[] }
+  // What a run said: ONE plain line by `after` and the lines of sandoq, folded until he asks. `pane` is the pane's step of the run
+  // when it waits for a new session (state restart): its entry says it as a call to action, which the check after the run does not give back.
+  said?: { plain: string; lines: string[]; pane?: Step }
   unfolded: boolean
   // The page the unfolded lines are at: they page by lines with a pager of their own when they do not fit the rows.
   linesPage?: number
@@ -177,7 +178,13 @@ export function versionsTable({ ui, width, edge, cannot = '', checked, busy, tab
   const under = (act: { label: string } | undefined): boolean => act !== undefined && wide && cellsOf(act.label) > ACT
 
   // The words under an entry: for the pane its two versions (the here column holds the loaded one alone), then what the record says.
-  const notesOf = (step: Step): string[] => [...(isPane(step) ? [paneVersions(step, table.loaded).note] : []), noteOf(step)].filter(note => note !== '')
+  // The pane after its update says what to do (model/steps.ts restartLines) and not the line of sandoq: from its own step in the state
+  // restart, or from the pane's step of the run that just ended (the check after it does not give that state back). Any other state is as before.
+  const callOf = (step: Step): Step | undefined => (isPaneRestart(step) ? step : isPane(step) ? table.said?.pane : undefined)
+  const notesOf = (step: Step): string[] => {
+    const call = callOf(step)
+    return call !== undefined ? restartLines(call) : [...(isPane(step) ? [paneVersions(step, table.loaded).note] : []), noteOf(step)].filter(note => note !== '')
+  }
   const hereOf = (step: Step): string => (isPane(step) ? paneVersions(step, table.loaded).text : step.here)
   const thereOf = (step: Step): string => (step.there === '' ? '—' : step.there)
   // The stacked row's second line says `here → there` where the disc moves; a disc on hold does not move, so its note says what is newer.
@@ -198,8 +205,9 @@ export function versionsTable({ ui, width, edge, cannot = '', checked, busy, tab
     const id = labelOf(step)
     const act = actOf(step)
     const button = act !== undefined && <Button key={`versions-update-${id}`} plain label={act.label} onPress={act.press} />
+    // The call to action of a pane that waits for a new session is the default ink (the first of its lines); the move note under it is dim.
     const notes = notesOf(step).map((note, i) => (
-      <Text key={`${id}-note-${i}`} color={THEME.dim} wrap="wrap">
+      <Text key={`${id}-note-${i}`} color={callOf(step) !== undefined && i === 0 ? undefined : THEME.dim} wrap="wrap">
         {note}
       </Text>
     ))
@@ -310,8 +318,10 @@ export function versionsTable({ ui, width, edge, cannot = '', checked, busy, tab
   // and what sandoq said is folded behind `Show N lines`, then `Hide the lines`.
   const refused = table.refused
   const said = table.said
-  const paneNote = paneVersions(paneStepOf(table.steps), table.loaded).note
-  const plain = said === undefined || said.plain === '' || (said.plain === RESTART_CLAUDE && paneNote !== '') ? '' : said.plain
+  const paneStep = paneStepOf(table.steps)
+  const paneNote = paneVersions(paneStep, table.loaded).note
+  // The run's Open a new session line is not said again where the pane's entry says it (its two versions, or its call to action).
+  const plain = said === undefined || said.plain === '' || (said.plain === RESTART_CLAUDE && (paneNote !== '' || isPaneRestart(paneStep) || said.pane !== undefined)) ? '' : said.plain
   const lines = said?.lines ?? []
 
   // The blocks under the table, each with its own rows: they come out of the rows the entries have, and each takes a gap row but in

@@ -23,6 +23,7 @@ import {
 } from './bridge.ts'
 import type { Env, Room } from './bridge.ts'
 import { pagePathOf } from './model/page.ts'
+import { NUDGE_EVERY } from './model/nudge.ts'
 import { mayMakeRoomIn, roomNameOf } from './model/roomstart.ts'
 import { seatName } from './model/seat.ts'
 import { settingsText } from './model/settings.ts'
@@ -33,7 +34,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.66'
+export const VERSION = '0.8.74'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
 export const SANDOQ_OPTION_NAME = 'sandoq'
 
@@ -168,6 +169,23 @@ export const roomFileArgv = (host: Host, seat: string, file: string): string[] |
   const name = host.name ?? ''
   if (host.marked !== true || (host.sandoq ?? '') === '' || !DISC_NAME.test(name) || !SEAT_NAME.test(seat) || !fileNameFit(file)) return undefined
   return inRunArgv(host, [host.sandoq ?? '', ROOM_NOUN, OPEN_VERB, name, FILE_KIND, seat, file])
+}
+// NUDGE (order nudge pane): the verb that wakes a seat at an interval, in the world (`salam/cli.py nudge`) and in a marked room (`sandoq room nudge ROOM`,
+// from the sandoq release that has it). Both take `--seat SEAT` and print one json object (`--json`, NudgeRead of model/nudge.ts); the change is the
+// interval alone (`--every D`, D one of NUDGE_EVERY), `off` (`--off`), or none: the state is only read. The seat is of the plain word shape and the
+// room's name of DISC_NAME, each ONE argv word that is read as no flag, else there is no argv. A room runs in its own folder, as the other calls do.
+export type NudgeChange = string | undefined
+const nudgeFlags = (change: NudgeChange): string[] | undefined =>
+  change === undefined ? [] : change === 'off' ? ['--off'] : NUDGE_EVERY.includes(change) ? ['--every', change] : undefined
+export const worldNudgeArgv = (cliPy: string, seat: string, change?: NudgeChange): string[] | undefined => {
+  const flags = nudgeFlags(change)
+  return cliPy === '' || flags === undefined || !SEAT_NAME.test(seat) ? undefined : ['python3', cliPy, 'nudge', '--seat', seat, ...flags, JSON_WORD]
+}
+export const roomNudgeArgv = (host: Host, seat: string, change?: NudgeChange): string[] | undefined => {
+  const name = host.name ?? ''
+  const flags = nudgeFlags(change)
+  if (host.marked !== true || (host.sandoq ?? '') === '' || !DISC_NAME.test(name) || flags === undefined || !SEAT_NAME.test(seat)) return undefined
+  return inRunArgv(host, [host.sandoq ?? '', ROOM_NOUN, 'nudge', name, '--seat', seat, ...flags, JSON_WORD])
 }
 export const sandoqVersionArgv = (sandoq: string): string[] => [sandoq, '--version']
 export const roomAppVersionArgv = (host: Host): string[] => sandoqVersionArgv(host.sandoq ?? '')
@@ -321,6 +339,10 @@ export const localAboutArgv = (host: Host, recordId: string, text: string): stri
 // and would make the text an answer under a seat's open wake. A room found by room.sh keeps card.py with the gate alone.
 export const barCardArgv = (host: Host, text: string): string[] =>
   host.marked ? inRunArgv(host, [host.sandoq ?? '', 'room', 'card', '--no-seat'], text) : inRunArgv(host, programArgv(host, MARK_PROGRAMS.card, 'py', [host.gate]), text)
+// His line to the keeper on a desk card (order keeper chat): `sandoq room run chat GATE .CARD`, his words on the input. GATE is the instance and .CARD the
+// card's word with its dot (the pane adds it to the bare id). Only a marked room has the program by its bare name, so any other room has no argv: [].
+export const chatArgv = (host: Host, cardId: string, text: string): string[] =>
+  host.marked ? inRunArgv(host, [host.sandoq ?? '', 'room', 'run', 'chat', host.gate, `.${cardId.replace(/^\./, '')}`], text) : []
 // feed.sh offers the card's word to the room and rings.
 export const localFeedArgv = (host: Host, word: string): string[] =>
   inRunArgv(host, programArgv(host, MARK_PROGRAMS.feed, 'sh', ['-r', host.gate, word]))

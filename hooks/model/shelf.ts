@@ -1,9 +1,11 @@
 // The shelf and the run folder's listing: the catalog of records, the cards by time, what each record
 // grew from, and what runs. Pure, with no `$`. Run by `node` too (hook.ts imports newestIds): no
 // enums, `import type`, `.ts` in imports.
-import { ID_FIRST, blockWords, fenceText, idOf, parentOf, parseBlocks, preview, stripUlid } from './blocks.ts'
+import { ID_FIRST, blockWords, fenceText, idOf, parentOf, preview, stripUlid } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import { parseWalk } from './walk.ts'
+import { readOf } from './walkread.ts'
+import type { Read } from './walkread.ts'
 
 // How many of the newest cards the pane lists.
 export const SHOWN_CARDS = 8
@@ -56,24 +58,35 @@ function roleUp(block: Block, byId: Map<string, Block>): string {
 // Which card grew the record (a decision holding its ULID first, with a `grown` key) and which
 // later cards decide it again (a decision holding its ULID first). Walks are { id, text }; the
 // ULIDs sort by time.
+// The decisions of a walk that are no intent's, found once for as long as the walk's text stands (a catalog of many records asks every walk for each).
+const decidedKept = new WeakMap<Read, Block[]>()
+function decidedOf(read: Read): Block[] {
+  const kept = decidedKept.get(read)
+  if (kept !== undefined) return kept
+  const made = read.blocks.filter(block => block.cho === 'decided' && block.chi !== 'intent')
+  decidedKept.set(read, made)
+  return made
+}
+
 export function itemFacts(entry: CatalogEntry, walks: { id: string; text: string }[]): ItemFacts {
-  const ordered = [...walks].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  // The poll's walks come sorted by their names; a sort of two thousand for each record of the catalog is left out when they stand in order.
+  const inOrder = walks.every((walk, at) => at === 0 || walks[at - 1].id <= walk.id)
+  const ordered = inOrder ? walks : [...walks].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const decisions = ordered.map(walk => {
-    const blocks = parseBlocks(walk.text)
-    const byId = new Map(blocks.map(block => [idOf(block), block] as const))
-    const held = blocks
-      .filter(block => block.cho === 'decided' && block.chi !== 'intent')
-      .filter(block =>
-        entry.id !== '' ? ID_FIRST.exec(block.words)?.[1] === entry.id : blockWords(block.words) === entry.name,
-      )
-    return { id: walk.id, held, byId }
+    const read = readOf(walk)
+    const held = decidedOf(read).filter(block =>
+      entry.id !== '' ? ID_FIRST.exec(block.words)?.[1] === entry.id : blockWords(block.words) === entry.name,
+    )
+    return { id: walk.id, held, blocks: read.blocks }
   })
   const added = decisions.find(walk => walk.held.some(block => block.fence.grown !== undefined))
   const mentions: Mention[] = []
   for (const walk of decisions) {
     if (added && walk.id <= added.id) continue
+    // the index of the walk's blocks is made for a walk that holds the record only
+    const byId = walk.held.length === 0 ? new Map<string, Block>() : new Map(walk.blocks.map(block => [idOf(block), block] as const))
     for (const block of walk.held) {
-      const mention = { id: walk.id, role: roleUp(block, walk.byId) || 'decided' }
+      const mention = { id: walk.id, role: roleUp(block, byId) || 'decided' }
       if (!mentions.some(m => m.id === mention.id && m.role === mention.role)) mentions.push(mention)
     }
   }

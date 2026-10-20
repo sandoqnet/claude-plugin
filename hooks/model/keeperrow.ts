@@ -3,14 +3,14 @@
 // row off). Read from the walk, as the asks are: never put on the shelf and never a `room desk` item. A pick of an ask that is a seat's, a pick of an
 // earlier day, a pick he changed (his own tap stands as a second decision under the ask) and a pick he took off by OK are no row. Pure: no host, no
 // view. Run by `node` too: no enums, `import type`, `.ts` in imports.
-import { fenceText, idOf, parentOf, parseBlocks } from './blocks.ts'
-import { gatesOf } from './gate.ts'
+import { fenceText, idOf, parentOf } from './blocks.ts'
 import { keeperPicks } from './motion.ts'
 import { ulidMs } from './profile.ts'
 import type { WalkText } from './profile.ts'
 import { THIS_SEAT, askedWait, waitsOnHim } from './seat.ts'
 import type { SeatState } from './seat.ts'
-import { parseWalk } from './walk.ts'
+import { readOf } from './walkread.ts'
+import type { Read } from './walkread.ts'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -26,26 +26,24 @@ const dayOf = (ms: number, zone: number): number => Math.floor((ms + zone * MINU
 
 type Pick = KeeperRow & { changed: boolean }
 
-// The picks of one walk, whatever their day: a walk is read once for as long as its text stands.
-const kept = new Map<string, { text: string; picks: Pick[] }>()
+// The picks of one walk, whatever their day: a walk is read once for as long as its text stands (the picks hang on the walk's read of walkread.ts).
+const kept = new WeakMap<Read, Pick[]>()
 
 function picksOf(walk: WalkText): Pick[] {
-  const held = kept.get(walk.id)
-  if (held !== undefined && held.text === walk.text) return held.picks
-  const made = readPicks(walk)
-  if (kept.size > 2000) kept.clear()
-  kept.set(walk.id, { text: walk.text, picks: made })
+  const read = readOf(walk)
+  const held = kept.get(read)
+  if (held !== undefined) return held
+  const made = readPicks(walk, read)
+  kept.set(read, made)
   return made
 }
 
-function readPicks(walk: WalkText): Pick[] {
+function readPicks(walk: WalkText, { blocks, read, gates }: Read): Pick[] {
   // Only a walk that names the keeper holds a pick: the cheap test first.
   if (!walk.text.includes('keeper')) return []
-  const blocks = parseBlocks(walk.text)
   const decided = blocks.filter(block => block.cho === 'decided' && fenceText(block, 'by') === 'keeper')
-  if (decided.length === 0 || !waitsOnHim(parseWalk(walk.text).source, 'public')) return []
+  if (decided.length === 0 || !waitsOnHim(read.source, 'public')) return []
   const names = keeperPicks(walk.text)
-  const gates = gatesOf(walk.text)
   const start = ulidMs(walk.id)
   // A block with no time of its own takes the time of the block before it; the first of them, the start of the card (as eventsOf says).
   const times = new Map<object, number>()

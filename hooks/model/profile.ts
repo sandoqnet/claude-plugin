@@ -1,10 +1,12 @@
 // The profile of one record and the rows of the shelf, from the catalog and the walks of the run folder
 // (read only). Pure, with no `$`: every time word takes `now` as a value. A record is named on a
 // card by a decision whose first term is its ULID (or by a reference that no decision closed).
-import { ID_FIRST, fenceText, idOf, parentOf, parseBlocks, preview, stripUlid } from './blocks.ts'
+import { ID_FIRST, fenceText, idOf, parentOf, preview, stripUlid } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import { frameNameOf, isDecision } from './reading.ts'
 import type { CatalogEntry } from './shelf.ts'
+import { readOf } from './walkread.ts'
+import type { Read } from './walkread.ts'
 
 export type WalkText = { id: string; text: string }
 
@@ -42,13 +44,22 @@ export function ageWords(ms: number, now: number): string {
 // ---- the walks, read once: each card's blocks, oldest card first.
 export type Indexed = { id: string; first: string; blocks: Block[]; byId: Map<string, Block> }
 
+// Each walk is indexed once for as long as its text stands (order walks-once): the result hangs on the walk's read (walkread.ts), which a changed text
+// replaces and a walk that is gone drops, so the index of the same walks a second time is the same objects and parses nothing.
+const indexed = new WeakMap<Read, Indexed>()
+
 export function indexWalks(walks: WalkText[]): Indexed[] {
   return [...walks]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map(walk => {
-      const blocks = parseBlocks(walk.text)
+      const read = readOf(walk)
+      const kept = indexed.get(read)
+      if (kept !== undefined) return kept
+      const { blocks } = read
       const source = blocks.find(block => block.cho === 'source')
-      return { id: walk.id, first: preview(source?.body ?? ''), blocks, byId: new Map(blocks.map(block => [idOf(block), block] as const)) }
+      const made: Indexed = { id: walk.id, first: preview(source?.body ?? ''), blocks, byId: new Map(blocks.map(block => [idOf(block), block] as const)) }
+      indexed.set(read, made)
+      return made
     })
 }
 

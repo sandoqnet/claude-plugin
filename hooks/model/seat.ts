@@ -10,14 +10,14 @@
 // no session: a card names its seat in the fence of its root.
 import { blockWords, fenceText, idOf, parentOf, parseBlocks, preview } from './blocks.ts'
 import type { Block } from './blocks.ts'
-import { gatesOf, reasonOf } from './gate.ts'
-import type { AskWhy, Decision, Draft, Gate } from './gate.ts'
+import { reasonOf } from './gate.ts'
+import type { AskWhy, Decision, Draft } from './gate.ts'
 import { ageWords, ulidMs } from './profile.ts'
 import type { WalkText } from './profile.ts'
 import type { CatalogEntry } from './shelf.ts'
 import { turnsOf } from './turn.ts'
 import type { Turn } from './turn.ts'
-import { parseWalk } from './walk.ts'
+import { readOf } from './walkread.ts'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -175,18 +175,6 @@ function choicesOf(blocks: Block[], ask: Block, turns: () => Turn[]): string[] {
     return `${shared(pick.name) && pick.line !== '' ? `${pick.name} · ${pick.line}` : pick.name} ${pick.choice}`
   })
   return [...new Set([...words, ...(turn?.extras ?? []), 'new', 'none'])].filter(choice => choice !== '')
-}
-
-// A walk read once for as long as its text stands: the blocks, the reading and the gates of its asks.
-type Read = { text: string; blocks: Block[]; read: ReturnType<typeof parseWalk>; gates: Gate[] }
-const reads = new Map<string, Read>()
-function readOf(walk: WalkText): Read {
-  const kept = reads.get(walk.id)
-  if (kept !== undefined && kept.text === walk.text) return kept
-  if (reads.size > 2000) reads.clear()
-  const made: Read = { text: walk.text, blocks: parseBlocks(walk.text), read: parseWalk(walk.text), gates: gatesOf(walk.text) }
-  reads.set(walk.id, made)
-  return made
 }
 
 // Does an ask of a card wait on HIM. A card the harness sent (its source, read by parseWalk: the rule of order B-M5) is the

@@ -1,4 +1,4 @@
-import { VERSION, roomPagePath } from '../host'
+import { CHANNEL, VERSION, roomPagePath } from '../host'
 import { CALM_HOUR, HOUR_OWN_LINE, backgroundLine, isOwnWall } from '../model/background'
 import type { Background } from '../model/background'
 import { FROM_DESK, deskRows, doneToday, hisCount, rowKey, shapesAnsweredToday } from '../model/desk'
@@ -1437,7 +1437,7 @@ const isTabRoot = (nav: Nav): boolean =>
 // in place of the desk there). A room that is not read or not there says so in the place, so it is never at rest.
 const isRest = (nav: Nav, seat: string, exists: boolean | undefined): boolean => exists === true && ((nav.view === 'seat' && (nav.name === '' || nav.name === seat)) || (nav.view === 'feed' && nav.cardId === ''))
 
-// The terminal's status line: a dot lit while a door runs, the path ROOM › SEAT, then the quiet words (the door, what waits, the cards and the
+// The terminal's status line: a dot lit while a door runs, the channel (prod or dev, quiet), the path ROOM › SEAT, then the quiet words (the door, what waits, the cards and the
 // cost); off the Public lens the cost and the count (the faults too under Operator) stand at the right, as the head said them.
 function terminalStatus(state: RoomState) {
   const { ui, face, exists, cards, total, isDoorUp = false } = state
@@ -1450,6 +1450,7 @@ function terminalStatus(state: RoomState) {
   return (
     <Box key="status-line" flexDirection="row" flexWrap="wrap" columnGap={1}>
       <Text color={isDoorUp ? LOOK.ok : LOOK.quiet}>●</Text>
+      <Text color={LOOK.quiet}>{CHANNEL}</Text>
       {pathView(state)}
       {exists && placeStatusTerminal(state)}
       {exists && meta.length > 0 && <Text color={LOOK.quiet}>{meta.join(' · ')}</Text>}

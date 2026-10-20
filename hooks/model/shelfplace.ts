@@ -4,13 +4,12 @@
 // not hold leaves its part out, and no section is ever guessed. Run by `node` too: no enums, `import type`,
 // `.ts` in imports.
 import { ID_FIRST, blockWords, fenceText, idOf, parseBlocks, preview, stripUlid } from './blocks.ts'
-import { gatesOf } from './gate.ts'
 import type { Decision } from './gate.ts'
 import { dateOf, ulidMs } from './profile.ts'
 import type { WalkText } from './profile.ts'
 import { itemFacts } from './shelf.ts'
 import type { CatalogEntry } from './shelf.ts'
-import { parseWalk } from './walk.ts'
+import { readOf } from './walkread.ts'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -78,7 +77,7 @@ export function rulesToday(rulesText: string, walks: WalkText[], today: number, 
   const day = dayOf(today, zone)
   const counts = new Map<string, number>()
   for (const walk of walks) {
-    for (const gate of gatesOf(walk.text)) {
+    for (const gate of readOf(walk).gates) {
       const decision = gate.decision
       if (decision?.rule === undefined || whoOf(decision) === '') continue
       if (dayOf(ulidMs(decision.id), zone) !== day) continue
@@ -97,12 +96,27 @@ export function rulesToday(rulesText: string, walks: WalkText[], today: number, 
 // What a record is, "a board", "an item".
 const whatOf = (che: string): string => (che === '' ? '' : `${/^[aeiou]/i.test(che) ? 'an' : 'a'} ${che}`)
 
+// The card that grew each record, by the record's id, in one pass over the walks in the order of their ids: the first card whose decision (no intent's)
+// holds the id first and has a `grown` key. It is what itemFacts finds for one record at a time, for a catalog of many records (order walks-once).
+function grownBy(walks: WalkText[]): Map<string, string> {
+  const grown = new Map<string, string>()
+  for (const walk of walks) {
+    for (const block of readOf(walk).blocks) {
+      if (block.cho !== 'decided' || block.chi === 'intent' || block.fence.grown === undefined) continue
+      const id = ID_FIRST.exec(block.words)?.[1]
+      if (id !== undefined && !grown.has(id)) grown.set(id, walk.id)
+    }
+  }
+  return grown
+}
+
 // How a record came: the decision that grew it, by whom, as the card wrote it. Empty when no card holds it.
-function howOf(entry: CatalogEntry, walks: WalkText[]): string {
-  const added = itemFacts(entry, walks).addedId
+function howOf(entry: CatalogEntry, walks: WalkText[], grown: Map<string, string>): string {
+  // A record with an id is looked up in the one pass over the walks (grownBy); one with none is found by its name, walk by walk.
+  const added = entry.id !== '' ? (grown.get(entry.id) ?? '') : itemFacts(entry, walks).addedId
   const walk = walks.find(item => item.id === added)
   if (walk === undefined) return ''
-  const decision = parseBlocks(walk.text).find(
+  const decision = readOf(walk).blocks.find(
     block => block.cho === 'decided' && block.chi !== 'intent' && ID_FIRST.exec(block.words)?.[1] === entry.id && block.fence.grown !== undefined,
   )
   if (decision === undefined) return ''
@@ -129,10 +143,10 @@ export function shelfOf({ walks, entries, rulesText, now, zone = 0 }: ShelfState
   const waits: Wait[] = []
   const answered: (Answered & { at: string; rule?: string })[] = []
   for (const walk of ordered) {
-    const gates = gatesOf(walk.text)
+    const { gates, read } = readOf(walk)
     // A gate waits until it is answered, of any day.
     for (const gate of gates) if (gate.decision === undefined) waits.push({ cardId: walk.id, askId: gate.askId, question: gate.question })
-    const first = preview(parseWalk(walk.text).text)
+    const first = preview(read.text)
     for (const gate of gates) {
       const decision = gate.decision
       if (decision === undefined || whoOf(decision) === '') continue
@@ -150,10 +164,11 @@ export function shelfOf({ walks, entries, rulesText, now, zone = 0 }: ShelfState
     return { id: rule.id, words: rule.words, today: own.length, by }
   })
 
+  const grown = grownBy(ordered)
   const shelf = entries
     .map((entry, place) => ({ entry, place, ms: ulidMs(entry.id) }))
     .sort((a, b) => b.ms - a.ms || b.place - a.place)
-    .map(({ entry, ms }) => ({ name: entry.name, id: entry.id, what: whatOf(entry.che), how: howOf(entry, walks), when: whenOf(ms, now, zone) }))
+    .map(({ entry, ms }) => ({ name: entry.name, id: entry.id, what: whatOf(entry.che), how: howOf(entry, ordered, grown), when: whenOf(ms, now, zone) }))
 
   return {
     waits,

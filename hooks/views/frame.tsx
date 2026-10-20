@@ -1,6 +1,7 @@
 // The frame of the room as a small desktop (order D1, still A1; the dock is order D2, still F1): the floating top bar, the dock of four
 // places with no composer, and the answered place. App surfaces only; the terminal draws as it did. Each view takes its data and its acts by props
 // and draws to the width it is told: the pane tells the columns, and `plan` (views/space.ts layout) says the canvas's own.
+import { CHANNEL } from '../host'
 import { FROM_DESK } from '../model/desk'
 import { DOCK_PLACES, TILE_CELL, TILE_ROWS, dockFootOf, dockOf, dockWord } from '../model/dock'
 import type { DockSlot } from '../model/dock'
@@ -139,6 +140,9 @@ export function barView({ ui, columns, tones, room, seat, date, time, lens, wait
       paddingX={SPACE.control}
     >
       <Box key="bar-left" width={side} flexDirection="row" columnGap={SPACE.near}>
+        <Text key="bar-channel" color={tones.dim} wrap="truncate-end">
+          {CHANNEL}
+        </Text>
         <Text key="bar-room" color={tones.dim} wrap="truncate-end">
           {room}
         </Text>

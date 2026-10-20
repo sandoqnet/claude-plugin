@@ -2,6 +2,7 @@ import type { Register } from 'claude-code'
 
 import {
   BACKGROUND_FILE,
+  CHANNEL,
   DISC_NAME,
   NO_ROOM,
   NO_SANDOQ,
@@ -96,6 +97,8 @@ import {
 import { bareIdFrom, cardIdFrom, feedWord, foldersUp, isBridgeOff, relativeTo } from './bridge'
 import type { Env } from './bridge'
 import type { FileCache, FileEntry, Host, Io, OwnCard, RoomKind } from './host'
+import { labWordsOf } from './labwords'
+import type { LabWords } from './labwords'
 import { midEdit } from './midsay'
 import { BACKGROUND_MOST, backgroundKey, backgroundLine, backgroundOf, bytesOfText, keptFor } from './model/background'
 import type { Background, KeptBackground } from './model/background'
@@ -164,6 +167,7 @@ import { DEFAULTS, change, changeMany, parseSettings } from './model/settings'
 import type { SettingKey, Settings } from './model/settings'
 import { SHOWN_CARDS, buildItem, itemLines, newestIds, parseCatalog, parseCatalogEntries } from './model/shelf'
 import type { CatalogEntry, Disc, ShelfRecord } from './model/shelf'
+import { keepWalks } from './model/walkread'
 import { sha256Of } from './model/sha256'
 import { NO_FILES, SEATS_READ_MOST, newestFile, oldLine, parseList, parseSeats, refusalLine } from './model/shelffiles'
 import type { SeatList, ShelfFilesRead } from './model/shelffiles'
@@ -502,6 +506,10 @@ const lateLine = (): string => (late !== '' ? late : partLate !== '' ? partLate 
 let findHold = 0
 // The room has been read once since the session started (a poll went through); until then the pane says it reads.
 let isRead = false
+// The one poll clock (order walks-once): `pollGen` is the number of the newest start, whose tick alone polls; `pollStop` is what the host gave to stop the
+// clock before (if it gives one).
+let pollGen = 0
+let pollStop: unknown
 // The poll that runs now: a session start drops it (its late answer changes nothing) and frees the poll.
 let reading: { dead: boolean; before: number } | undefined
 // The reads of the room that began and have not returned, those past their limit among them (a host process cannot be stopped).
@@ -1334,6 +1342,8 @@ let deskAsked = false
 
 async function readDesk($, quiet = false): Promise<void> {
   if (noSandoq()) return
+  const fault = readFault.make?.('his desk')
+  if (fault !== undefined) throw fault
   const run = (deskRun += 1)
   if (!quiet) {
     desk = { ...desk, state: 'reading' }
@@ -1766,6 +1776,8 @@ async function readSnapshot($, isRoom: boolean, withDiscs: boolean, withSeats: b
       const names = files.map(entry => entry.name)
       await readCached(io, host, dir, files, walkCache, new Set(newestIds(names).map(id => `${id}.md`)))
       const walks: WalkText[] = names.sort().map(name => ({ id: name.replace(/\.md$/, ''), text: walkCache.get(name)?.text ?? '' }))
+      // The reads of the walks the model keeps (model/walkread.ts) are those of the walks that stand: one that is gone is dropped.
+      keepWalks(walks)
       const cards: Card[] = []
       for (const id of newestIds(names, shown)) {
         const raw = walkCache.get(`${id}.md`)?.text ?? ''
@@ -2120,10 +2132,13 @@ async function readRoom($, token: { dead: boolean; before: number }) {
   // does not wait for it, so a sandoq that does not answer holds nothing else (it ends by its limit, and no second read starts while one is out).
   if (!noSandoq() && !deskPolling) {
     deskPolling = true
-    void readDesk($, true).finally(() => {
-      deskPolling = false
-      ringBell($)
-    })
+    // A fault of the read (freshRings, ringBell, openNav) is noted and no unhandled rejection: the host drops a server that has one.
+    void readDesk($, true)
+      .catch(error => noteRead({ part: 'his desk', error }))
+      .finally(() => {
+        deskPolling = false
+        ringBell($)
+      })
   }
   if (token.dead) return
   await takeApart($, said, 'the new answers', () => undefined, () => announce($, next))
@@ -2853,12 +2868,29 @@ async function doRoomRows($, room: string): Promise<string> {
   return bad > 0 ? `${told}\n${badRowLine(bad)}.` : told
 }
 
+// A lab word: its argv runs once, from the session's folder (the project root), and its rows (the out, then the err) are shown as they are, one a line.
+// A refusal, a row or a run that fails is shown and never tried again.
+async function doLabWords($, lab: LabWords): Promise<string> {
+  if (!Array.isArray(lab)) return lab.row
+  try {
+    const run = await runWithin($, lab, LIMIT.send, 'the lab word')
+    const rows = [...streamLines(run.stdout), ...streamLines(run.stderr)]
+    if (rows.length > 0) return rows.join('\n')
+    return run.exitCode === 0 ? 'sandoq: the lab word ran and said nothing.' : `sandoq: the lab word exited ${run.exitCode ?? 'with no code'}.`
+  } catch (error) {
+    return isUnanswered(error) ? error.message : `sandoq: the lab word did not run: ${scrub(String(error)).slice(0, 160)}`
+  }
+}
+
 // The words of /sandoq and /room: each slash word of the pane at their start (one WITH the slash) is taken off first, again and again
 // (withoutSlashWords). Then an at sign first is a say to a seat; the plain word `room` alone, a slash room at the end, or none opens the
 // pane; any other words are a say to the room, and the pane opens too. A plain word room at the start (`room is cold tonight`) is a say.
 const openOrSay = ($, args: unknown): Promise<string> => {
   const typed = String(args ?? '').trim()
   const words = withoutSlashWords(typed)
+  // The lab's words (hooks/labwords.ts: none in the shipped pane, the lab's verbs in /sandoq-dev) come first.
+  const lab = labWordsOf(words)
+  if (lab !== undefined) return doLabWords($, lab)
   if (words.startsWith('@')) return doAtSay($, words)
   // `chat WORDS` is his line to the keeper on the card the pane has open; it opens no pane.
   const chatWordsOf = chatCommandOf(words)
@@ -3351,7 +3383,7 @@ async function openNav($, nextWanted: Nav) {
   if (inNudge(next) && !inNudge(was)) void readNudge($)
   // His desk (order DESK): the items are read when the desk opens, then by the poll.
   if (next.view === 'desk') deskAsked = true
-  if (next.view === 'desk' && !deskWas) void readDesk($)
+  if (next.view === 'desk' && !deskWas) void readDesk($).catch(error => noteRead({ part: 'his desk', error }))
   // A page item opened from the list reads its file (order R3); the opened mark of the app (order O3) is for the item pressed alone, so another opens without it.
   if (next.view === 'desk' && next.item !== undefined && !(was.view === 'desk' && was.item === next.item)) {
     appOpened = ''
@@ -3947,7 +3979,7 @@ function doPaneRead(): string {
   const roomKind = host.mode === 'none' ? 'none found' : host.marked ? 'marked' : isLocal() ? 'not marked (room.sh)' : 'a room of the world'
   const card = nav.view === 'feed' || nav.view === 'yours' ? openedId() : ''
   const lines = [
-    `room pane ${VERSION}`,
+    `room pane ${VERSION} ${CHANNEL}`,
     seen === undefined
       ? `surface: not drawn yet; open the pane with ${TOOL} open`
       : `surface: ${seen.surface} · ${seen.columns} columns · ${seen.rows} rows${laidAt > 0 ? ` · laid out at ${Math.min(laidAt, seen.columns)} columns` : ''}`,
@@ -4243,8 +4275,13 @@ export const register: Register = on => {
     allSeats = false
     roomOpen = ''
     came = undefined
-    $.clock.every(POLL_MS, () => {
-      void poll($)
+    // One poll clock (order walks-once): an earlier start's clock is stopped when the host gives a stopper; with none, it goes on ticking but its tick
+    // is stale and polls nothing, so a start again leaves one clock that polls.
+    pollGen += 1
+    const mine = pollGen
+    if (typeof pollStop === 'function') pollStop()
+    pollStop = $.clock.every(POLL_MS, () => {
+      if (mine === pollGen) void poll($)
     })
     await waitUpTo($, LIMIT.start, firstRead($, first))
 

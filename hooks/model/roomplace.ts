@@ -4,7 +4,7 @@
 // (the blocks of the walks and the records of the catalog). Pure, with no `$`, and it imports no view
 // and no host module. A file that is missing or bad leaves its section out, nothing throws and
 // nothing is guessed. Run by `node` too: no enums, `import type`, `.ts` in imports.
-import { blockWords, idOf, namesWords, parentOf, parseBlocks } from './blocks.ts'
+import { blockWords, closerOf, idOf, namesWords, parseBlocks } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import { clockText } from './motion.ts'
 import type { WalkText } from './profile.ts'
@@ -153,7 +153,7 @@ export function updateOf(walks: WalkText[]): Update | undefined {
       const askId = idOf(ask)
       const { discs, listed } = discsOfAsk(ask)
       if (askId === '' || discs.length === 0) continue
-      if (blocks.some(block => block.cho === 'decided' && parentOf(block) === askId)) continue
+      if (closerOf(blocks, ask) !== undefined) continue
       if (newest !== undefined && newest.askId >= askId) continue
       const [first] = discs
       const pages = [...new Set(discs.map(disc => disc.page))]

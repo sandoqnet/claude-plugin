@@ -2,7 +2,7 @@
 // the decision with the door's word and the rule that answered. Pure, with no `$`, and it imports no view
 // and no host module. A key the walk does not hold is left out of the value, never made up. Run by `node`
 // too: no enums, `import type`, `.ts` in imports.
-import { ID_FIRST, blockWords, fenceText, idOf, namesWords, parentOf, parseBlocks, stripUlid } from './blocks.ts'
+import { ID_FIRST, blockWords, closerOf, fenceText, idOf, namesWords, parentOf, parseBlocks, stripUlid } from './blocks.ts'
 import type { Block } from './blocks.ts'
 
 const AT_ID = /@([0-9A-Za-z]{20,})/
@@ -132,7 +132,7 @@ function gateFrom(ask: Block, blocks: Block[]): Gate {
   if (typeof lean === 'string' && choices.includes(lean)) gate.lean = lean
   const draft = blocks.filter(block => block.chi === 'walk' && block.che === 'seat' && block.cho === 'draft' && parentOf(block) === askId).at(-1)
   if (draft !== undefined) gate.draft = { id: idOf(draft), by: fenceText(draft, 'by'), choice: fenceText(draft, 'choice') }
-  const decided = blocks.find(block => block.cho === 'decided' && parentOf(block) === askId)
+  const decided = closerOf(blocks, ask)
   if (decided !== undefined) gate.decision = decisionOf(decided, blocks, askId)
   return gate
 }

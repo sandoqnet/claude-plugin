@@ -1,6 +1,6 @@
 // The feed: which card is open, each card's age and asked line, the strip of the asks that wait for
 // the person, and the lines of the walk lens. Pure, with no `$`; the views only lay them out.
-import { ID_FIRST, blockWords, fenceText, fmtMs, idOf, parentOf, parseBlocks, preview } from './blocks.ts'
+import { ID_FIRST, blockWords, closerOf, fenceText, fmtMs, parseBlocks, preview } from './blocks.ts'
 import { INDENT, capitalize } from './walk.ts'
 import type { Card, Walk } from './walk.ts'
 
@@ -69,7 +69,7 @@ export function askedLine(text: string): string {
   const blocks = parseBlocks(text)
   const parts: string[] = []
   for (const ask of blocks.filter(block => block.cho === 'ask')) {
-    const decided = blocks.find(block => block.cho === 'decided' && parentOf(block) === idOf(ask))
+    const decided = closerOf(blocks, ask)
     if (decided !== undefined) parts.push(`${capitalize(blockWords(ask.words))} ${answerWords(ask, decided)}`)
   }
   return parts.length === 0 ? '' : `asked: ${parts.join(' · ')}`
@@ -104,9 +104,8 @@ export function stripOf(cards: Card[]): Strip {
   const keeper: StripRow[] = []
   for (const card of oldestFirst(cards)) {
     const blocks = parseBlocks(card.raw)
-    const decided = new Set(blocks.filter(block => block.cho === 'decided').map(parentOf))
     for (const ask of blocks) {
-      if (ask.cho !== 'ask' || decided.has(idOf(ask))) continue
+      if (ask.cho !== 'ask' || closerOf(blocks, ask) !== undefined) continue
       const row = { cardId: card.id, question: capitalize(blockWords(ask.words)), first: preview(card.text) }
       if (fenceText(ask, 'keeper') === 'asked') keeper.push(row)
       else rows.push(row)

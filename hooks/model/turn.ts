@@ -2,7 +2,7 @@
 // reading of what the person types. Pure, with no `$`: every time word takes `now` as a value. A
 // candidate's choice is `@ULID`, the others are `new` and `none`. Run by `node` too: no enums,
 // `import type`, `.ts` in imports.
-import { ID_FIRST, blockWords, fenceText, idOf, parentOf, parseBlocks, stripUlid } from './blocks.ts'
+import { ID_FIRST, blockWords, closerOf, fenceText, idOf, parentOf, parseBlocks, stripUlid } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import { ageWords, indexWalks, occurrenceMap, toldApart, ulidMs } from './profile.ts'
 import type { WalkText } from './profile.ts'
@@ -67,7 +67,7 @@ export function turnsOf(raw: string, entries: CatalogEntry[] | undefined, walks:
     .filter(block => block.cho === 'ask')
     .map((ask): Turn => {
       const askId = idOf(ask)
-      const decision = blocks.find(block => block.cho === 'decided' && parentOf(block) === askId)
+      const decision = closerOf(blocks, ask)
       const chosenId = decision ? (ID_FIRST.exec(decision.words)?.[1] ?? '') : ''
       const phrase = byId.get(parentOf(ask))
       const words = phrase?.cho === 'mention' ? blockWords(phrase.words).split('/')[0].trim() : ''

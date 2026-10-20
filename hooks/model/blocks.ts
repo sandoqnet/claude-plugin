@@ -97,6 +97,47 @@ export const parentOf = (block: Block): string => fenceText(block, 'parent')
 // A block id as a decision's words hold it first: `@ULID/Ardalan`.
 export const ID_FIRST = /^[\s/]*@([0-9A-Za-z]{20,})/
 
+// ---- an ask closed. The ONE rule every reader asks: which decision closes this ask, none while it waits.
+// The door writes a decision under its ask, but a decision he gave on the card (`none/Oct`, person::contact::decided) can stand under the
+// card, not the ask. So a decision closes an ask when its parent is the ask's id; else when it is of the ask's kind (the same chi and che),
+// its second term is the word of the mention the ask stands under, and its parent is no ask of the walk. A decision under the card never
+// closes two asks: it closes the first open ask of its kind and word, in walk order.
+const secondTermOf = (words: string): string => words.replace(/^[\s/]+/, '').split('/').slice(1).join('/').trim()
+
+const closersKept = new WeakMap<Block[], Map<string, Block>>()
+
+// The decision of each closed ask of `blocks`, by the ask's id.
+export function closersOf(blocks: Block[]): Map<string, Block> {
+  const kept = closersKept.get(blocks)
+  if (kept !== undefined) return kept
+  const asks = blocks.filter(block => block.cho === 'ask' && idOf(block) !== '')
+  const askIds = new Set(asks.map(idOf))
+  const closers = new Map<string, Block>()
+  for (const block of blocks) {
+    const parent = parentOf(block)
+    if (block.cho === 'decided' && askIds.has(parent) && !closers.has(parent)) closers.set(parent, block)
+  }
+  const loose = blocks.filter(block => block.cho === 'decided' && block.chi !== 'intent' && !askIds.has(parentOf(block)))
+  if (loose.length > 0) {
+    const byId = new Map(blocks.map(block => [idOf(block), block] as const))
+    for (const ask of asks) {
+      if (closers.has(idOf(ask))) continue
+      const mention = byId.get(parentOf(ask))
+      const word = mention?.cho === 'mention' ? blockWords(mention.words) : ''
+      if (word === '') continue
+      const at = loose.findIndex(block => block.chi === ask.chi && block.che === ask.che && secondTermOf(block.words) === word)
+      if (at < 0) continue
+      closers.set(idOf(ask), loose[at])
+      loose.splice(at, 1)
+    }
+  }
+  closersKept.set(blocks, closers)
+  return closers
+}
+
+// The decision that closes `ask`, undefined while it waits.
+export const closerOf = (blocks: Block[], ask: Block): Block | undefined => closersOf(blocks).get(idOf(ask))
+
 // `@ULID/Ardalan` -> Ardalan, `poster/@ULID/` -> poster, `Ardalan/@cha:ROOT` -> Ardalan
 export const blockWords = (words: string): string =>
   stripUlid(words)

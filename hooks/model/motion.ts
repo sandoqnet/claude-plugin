@@ -1,7 +1,7 @@
 // The world in motion: one row an event of the shown cards, oldest first, so the newest is at the
 // bottom. Pure, with no `$`; the trace face only lays the rows out. Run by `node` too: no enums,
 // `import type` for types, `.ts` in imports.
-import { ID_FIRST, blockWords, fenceText, idOf, parentOf, parseBlocks, preview } from './blocks.ts'
+import { ID_FIRST, blockWords, closerOf, fenceText, idOf, parentOf, parseBlocks, preview } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import { ulidMs } from './feed.ts'
 import { isCall, isLate, seatCall } from './operator.ts'
@@ -162,8 +162,7 @@ export function motionRows(cards: Card[], pending: PendingTap[], now: number): M
     const events = eventsOf(card)
     for (const tap of pending.filter(item => item.cardId === card.id)) {
       const ask = blocks.find(block => block.cho === 'ask' && idOf(block) === tap.askId)
-      const isDecided = blocks.some(block => block.cho === 'decided' && parentOf(block) === tap.askId)
-      if (ask !== undefined && !isDecided) events.push({ ms: now, text: `you tapped ${tap.choice}`, seat: 'you', count: 0, isDim: false })
+      if (ask !== undefined && closerOf(blocks, ask) === undefined) events.push({ ms: now, text: `you tapped ${tap.choice}`, seat: 'you', count: 0, isDim: false })
     }
     events.forEach((event, index) => rows.push({ ...event, cardId: card.id, index, first, order: rows.length }))
   }

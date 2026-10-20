@@ -1,7 +1,7 @@
 // The walk of one card and its three faces. Each builder takes the text of a walk (and the catalog or
 // versions text where it needs them) and returns plain values; the views only lay them out. Pure,
 // with no `$`. Run by `node` too (the hooks import it): no enums, `import type`, `.ts` in imports.
-import { ID_FIRST, blockWords, depthsOf, fenceText, fmtMs, idOf, parentOf, parseBlocks, preview, stripUlid } from './blocks.ts'
+import { ID_FIRST, blockWords, closerOf, depthsOf, fenceText, fmtMs, idOf, parentOf, parseBlocks, preview, stripUlid } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import type { CatalogEntry } from './shelf.ts'
 import { taskOf } from './task.ts'
@@ -304,9 +304,8 @@ export function parseWalk(text: string): Walk {
     rate: rateOf(block),
     depth: depths[i],
   }))
-  // An ask waits while no decision stands under it.
-  const decided = new Set(blocks.filter(block => block.cho === 'decided').map(parentOf))
-  const open = blocks.find(block => block.cho === 'ask' && !decided.has(idOf(block)))
+  // An ask waits while no decision closes it.
+  const open = blocks.find(block => block.cho === 'ask' && closerOf(blocks, block) === undefined)
   const choices: string[] = []
   if (open) {
     for (const child of blocks) {
@@ -422,7 +421,7 @@ export function publicView(text: string, catalog: CatalogEntry[]): PublicView {
   const asks: PublicAsk[] = blocks
     .filter(block => block.cho === 'ask')
     .map(ask => {
-      const decided = blocks.find(block => block.cho === 'decided' && parentOf(block) === idOf(ask))
+      const decided = closerOf(blocks, ask)
       return {
         question: capitalize(blockWords(ask.words)),
         choice: askPhrase(ask, decided),
@@ -560,7 +559,7 @@ export function traceRows(text: string): TraceRow[] {
     let end = ms
     let note = [fenceText(block, 'role'), fenceText(block, 'by'), fenceText(block, 'act')].filter(part => part !== '').join(' · ')
     if (block.cho === 'ask') {
-      const answer = blocks.find(item => item.cho === 'decided' && parentOf(item) === idOf(block))
+      const answer = closerOf(blocks, block)
       if (answer && fenceText(answer, 'by') === 'you') {
         kind = 'wait'
         end = msOf(answer)
@@ -605,12 +604,11 @@ const askChoices = (blocks: Block[], ask: Block): string[] => {
   return [...new Set(out)]
 }
 
-// Every ask of a walk with no decision under it, each with its own ULID and choices.
+// Every ask of a walk no decision closes, each with its own ULID and choices.
 export function openAsks(text: string): OpenAsk[] {
   const blocks = parseBlocks(text)
-  const decided = new Set(blocks.filter(block => block.cho === 'decided').map(parentOf))
   return blocks
-    .filter(block => block.cho === 'ask' && !decided.has(idOf(block)))
+    .filter(block => block.cho === 'ask' && closerOf(blocks, block) === undefined)
     .map(ask => ({ id: idOf(ask), question: blockWords(ask.words), choices: askChoices(blocks, ask) }))
 }
 

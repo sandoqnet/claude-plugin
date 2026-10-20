@@ -169,7 +169,7 @@ import { SHOWN_CARDS, buildItem, itemLines, newestIds, parseCatalog, parseCatalo
 import type { CatalogEntry, Disc, ShelfRecord } from './model/shelf'
 import { keepWalks } from './model/walkread'
 import { sha256Of } from './model/sha256'
-import { NO_FILES, SEATS_READ_MOST, newestFile, oldLine, parseList, parseSeats, refusalLine } from './model/shelffiles'
+import { NO_FILES, NO_SANDOQ_LINE, SEATS_READ_MOST, SEAT_UNFIT_LINE, VERSION_LATE_LINE, VERSION_NOT_RUN_LINE, VERSION_UNSAID_LINE, newestFile, oldLine, parseList, parseSeats, refusalLine } from './model/shelffiles'
 import type { SeatList, ShelfFilesRead } from './model/shelffiles'
 import { newestRecord, parseSeen, seenText, shelfSeenPath, themesOf, toldOf, whoseOf } from './model/shelfreads'
 import type { SeatShelf } from './model/shelfreads'
@@ -1331,6 +1331,7 @@ const forgetDesk = (): void => {
   shelfSeenRoot = undefined
   // And the sandoq's version for the room app (order O1) and the band's need, asked again at the pane's start.
   roomApp = undefined
+  roomAppFault = ''
   appOpened = ''
 }
 // The page of the desk's list a letter was opened from, so its `‹ Desk` lands on the same page.
@@ -1465,6 +1466,8 @@ async function openOrigin($, origin: string, id = ''): Promise<void> {
 // that this sandoq has no room app yet. The pane starts no browser: the verb opens it.
 // The version said is kept (order O3), so each verb compares it with its own release: ROOM_APP_FROM for the letter and the walk, ROOM_PAGE_FROM for the page.
 let roomApp: { sandoq: string; said: string } | undefined
+// Why the last read of the version kept nothing ('' while it is kept or none was asked): the Files part says it in one dim line.
+let roomAppFault = ''
 let appOpened = ''
 
 const roomAppFrom = (from: string): boolean => roomApp !== undefined && roomApp.sandoq === host.sandoq && roomAppHas(roomApp.said, from) && roomOpenArgv(host, 'letter', 'a') !== undefined
@@ -1476,8 +1479,16 @@ async function readRoomApp($): Promise<void> {
   if (sandoq === '' || roomApp?.sandoq === sandoq) return
   try {
     const run = await runWithin($, roomAppVersionArgv(host), LIMIT.open, 'sandoq --version')
-    roomApp = { sandoq, said: run.exitCode === 0 ? String(run.stdout ?? '') : '' }
-  } catch {
+    const said = run.exitCode === 0 ? String(run.stdout ?? '') : ''
+    // A read that gave no version is not kept for the path: it is asked again at the next read that needs it (a shelf read, a letter of the desk).
+    if (!/\d+\.\d+\.\d+/.test(said)) {
+      roomAppFault = VERSION_UNSAID_LINE
+      return
+    }
+    roomApp = { sandoq, said }
+    roomAppFault = ''
+  } catch (error) {
+    roomAppFault = isUnanswered(error) ? VERSION_LATE_LINE : VERSION_NOT_RUN_LINE
     return
   }
   $.ui.invalidate('ui.render')
@@ -1679,16 +1690,19 @@ async function readBackground(io: Io, listing: FileEntry[]): Promise<Background 
 // the list of a seat, as its own processes; it walks no folder and reads no file of a shelf. It runs only with the shelf window open (the moments the
 // seats' shelves are read), with no clock of its own. The lists are those of the first SEATS_READ_MOST seats of the answer and of the seat whose shelf
 // is open, and a list is read again only when its seat's count or newest time moved. A sandoq under SHELF_FILES_FROM runs nothing and the Files part says
-// so in one line; its version is the one read once for the room app (readRoomApp), and none read yet shows nothing. A refusal, bad words or a call that
-// did not answer is one line, shown whole. With no shelf open the last reading of this room stands.
+// so in one line; its version is the one read for the room app (readRoomApp), asked again at a shelf read while none is kept, and a sandoq not found, a
+// version not said, not answered or not run is one line each. A refusal, bad words or a call that did not answer is one line, shown whole. With no shelf
+// open the last reading of this room stands.
 async function readFiles($, root: string, withSeats: boolean): Promise<ShelfFilesRead> {
   const kept = filesKept?.root === root ? filesKept : undefined
-  if (!withSeats || noSandoq()) return kept?.read ?? NO_FILES
+  // with no shelf open nothing is drawn: the last reading stands. With it open, no way to stop is silent: each says its one line.
+  if (!withSeats) return kept?.read ?? NO_FILES
+  const stop = (line: string): ShelfFilesRead => ({ ...NO_FILES, read: true, line })
+  if (noSandoq()) return stop(NO_SANDOQ_LINE)
   await readRoomApp($)
   const said = roomApp !== undefined && roomApp.sandoq === host.sandoq ? roomApp.said : ''
-  if (!/\d+\.\d+\.\d+/.test(said)) return kept?.read ?? NO_FILES
-  if (!roomAppHas(said, SHELF_FILES_FROM)) return { ...NO_FILES, read: true, line: oldLine(SHELF_FILES_FROM) }
-  const stop = (line: string): ShelfFilesRead => ({ ...NO_FILES, read: true, line })
+  if (!/\d+\.\d+\.\d+/.test(said)) return stop(roomAppFault !== '' ? roomAppFault : VERSION_UNSAID_LINE)
+  if (!roomAppHas(said, SHELF_FILES_FROM)) return stop(oldLine(SHELF_FILES_FROM))
   let seats: ShelfFilesRead
   try {
     const got = await runWithin($, shelfSeatsArgv(host), LIMIT.poll, 'sandoq shelf list')
@@ -1714,7 +1728,10 @@ async function readFiles($, root: string, withSeats: boolean): Promise<ShelfFile
         return
       }
       const argv = shelfListArgv(host, seat)
-      if (argv === undefined) return
+      if (argv === undefined) {
+        lists[seat] = { line: SEAT_UNFIT_LINE, total: 0, files: [] }
+        return
+      }
       try {
         const got = await runWithin($, argv, LIMIT.poll, 'sandoq shelf list SEAT')
         if (got.exitCode !== 0) {

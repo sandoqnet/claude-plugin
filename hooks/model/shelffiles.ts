@@ -36,6 +36,12 @@ export const GROUP_LINES = 3
 export const FILES_BAD = 'The pane does not know the answer of sandoq about the files.'
 export const FILES_NONE = 'No files on the shelf yet.'
 export const oldLine = (from: string): string => `Files on the shelf come with sandoq ${from}.`
+// The dim lines of a read that could not start, one for each way it stops before the CLI is asked (shelf open, so the Files part is drawn).
+export const NO_SANDOQ_LINE = 'Files on the shelf: the pane found no sandoq to ask.'
+export const VERSION_UNSAID_LINE = 'Files on the shelf: sandoq did not say its version.'
+export const VERSION_LATE_LINE = 'Files on the shelf: sandoq did not answer its version in time.'
+export const VERSION_NOT_RUN_LINE = 'Files on the shelf: sandoq --version did not run.'
+export const SEAT_UNFIT_LINE = "Files not asked: this seat's name is not one sandoq takes."
 
 // A seat's name as the CLI takes it: letters, digits, dash and underscore, the first not a dash.
 export const SEAT_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/

@@ -34,7 +34,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.82'
+export const VERSION = '0.8.83'
 // The channel the pane runs in: `prod` in the released pane; .kairos/devpane/refresh.sh makes it `dev` in the dev copy. The status line says it.
 export const CHANNEL = 'prod'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
@@ -90,7 +90,8 @@ export const RESTART_WORD = '--restart'
 const UPDATE = 'update'
 const PANE_NOUN = 'pane'
 const ROOM_NOUN = 'room'
-// The checks: each argv holds the word `--check`, so none runs an update. The first asks sandoq itself, from the folder the pane
+// The checks: each argv holds the word `--check`, so none runs an update. (The updates are the four below, each on a press: the pane's, a disc's or each
+// disc's, and sandoq's own.) The first asks sandoq itself, from the folder the pane
 // runs in; the second asks the room, from the room's own folder as a tap runs, and with `--restart` so that it says what a press of
 // Update would do to the door (an object of noun door, would-restart, or the refusal door-stands).
 export const updateCheckArgv = (host: Host): string[] => [host.sandoq ?? '', UPDATE, CHECK_WORD, JSON_WORD]
@@ -99,6 +100,13 @@ export const roomUpdateCheckArgv = (host: Host): string[] =>
 // The update of the pane: sandoq pane update, from the folder the pane runs in, on the press of the Update of the pane's line alone.
 // It changes nothing of the room and stops no door.
 export const updatePaneArgv = (host: Host): string[] => [host.sandoq ?? '', PANE_NOUN, UPDATE, JSON_WORD]
+// The update of sandoq itself (his word, Q282, order PF1): `sandoq update --verified --json` from the folder the pane runs in, on the press of the Update of the
+// update band alone and never by itself: sandoq, the player, the discs and the pane, in that order, and the door restarts where its steps say so. `--verified` asks
+// for the signature, so only a signed release installs: no flag of the pane skips the sign. The json form says each step as one object a line, read as the others.
+// sandoq has the word `--verified` from SANDOQ_UPDATE_FROM; under it the usage answers exit 2 and the pane offers no press.
+export const VERIFIED_WORD = '--verified'
+export const SANDOQ_UPDATE_FROM = '0.4.43'
+export const updateSandoqArgv = (host: Host): string[] => [host.sandoq ?? '', UPDATE, VERIFIED_WORD, JSON_WORD]
 // The Secrets section of Settings (order S2): `sandoq secret list` says each name, its discs and where it is kept. The pane runs no other call
 // of the noun: a value is set in a terminal or in the sandoq control panel.
 const SECRET_NOUN = 'secret'
@@ -274,10 +282,13 @@ export const DISC_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/
 // or each disc's) fetches and installs, 1800 s, sandoq's own bound of a player install, for a limit under it would cut a run sandoq
 // still holds; with the restart flag 1200 s more for each disc that waits (sandoq's bound is 1200 s a disc; ours stands above it).
 // Every update goes by spawn (register.tsx), for the app cuts a process run at 30 s.
-export type Command = 'check' | 'pane' | 'room'
+export type Command = 'check' | 'pane' | 'room' | 'sandoq'
 const UPDATE_LIMIT = 1800000
+// `sandoq update` holds four steps (sandoq, the player, the discs, the pane), each with a bound of its own in sandoq (an install 1800 s, a child 3600 s): the limit is
+// the three of an update, which stands over the run of an install and its pane. A run past it is left running, as any is.
+const SANDOQ_LIMIT = 3 * UPDATE_LIMIT
 export const limitOf = (command: Command, waiting = 0, restart = false): number =>
-  command === 'check' ? 150000 : command === 'pane' ? UPDATE_LIMIT : UPDATE_LIMIT + (restart ? waiting * 1200000 : 0)
+  command === 'check' ? 150000 : command === 'pane' ? UPDATE_LIMIT : command === 'sandoq' ? SANDOQ_LIMIT : UPDATE_LIMIT + (restart ? waiting * 1200000 : 0)
 // A press that may pass its plain limit (the restart wait is on top of it) says so on the line of its Button.
 export const mayTakeLong = (limitMs: number): boolean => limitMs > UPDATE_LIMIT
 

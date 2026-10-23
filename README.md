@@ -1,4 +1,4 @@
-# room-pane 0.8.82
+# room-pane 0.8.83
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -344,7 +344,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.82 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.83 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -949,8 +949,12 @@ one process, by spawn, with a limit of 1800 seconds, from the folder the pane ru
 this room is updated by `sandoq room update --json NAME` (with `--restart` before the name when the
 check said the door of the unit would restart), never by `sandoq disc update`, which brings the
 machine's disc. Limit of a room update: 1800 seconds, and with `--restart` 1200 seconds more for
-each disc that waits. The two are the only updates the pane runs: any other argv that holds the
-word `update` holds `--check`. Each runs on its press alone, never in a poll and never at a draw.
+each disc that waits. The third is sandoq's own, `sandoq update --verified --json` (sandoq, the
+player, the discs and the pane, in that order, with the sign asked for so that only a signed
+release installs, and the limit three times that of an update): it runs on the Update of the band
+for a new sandoq alone (his word, Q282), from sandoq 0.4.43. The three are the only updates the
+pane runs: any other argv that holds the word `update` holds `--check`. Each runs on its press
+alone, never in a poll and never at a draw.
 The update of the pane changes nothing of the room and stops no door. No run of the card goes by a
 process run with a limit over 30 seconds: the checks go by process run first and once by spawn
 after the app's cut, the updates go by spawn.
@@ -981,6 +985,51 @@ after the app's cut, the updates go by spawn.
 
 The pane cannot say whether the desktop app asks the person before it runs a new argv of sandoq:
 the fake host that tests it never asks.
+
+### The update flow
+
+An update that waits is said once, in any place (order PF1, Ardalan's Pane flows). What waits is
+read from two things the pane already has: the open ask of an offer on the walks, and the steps of
+the last Check now. Every version in it is one of them gave: a wait with no version read is no
+sign, and with no read there is no number. A disc the ask names that the room plays at that
+version, or that an update of this session took in, is no sign (the ask stays open on the walks).
+
+- **The band.** At the top of the card in any place but two (the Room place and the Versions
+  section of Settings, which say an update in their own words): `Waits for you · NAME VERSION is
+  ready.` with `What changes ›` where the offer has one page, Not now and Update. It holds the
+  versions alone: the update read has no release notes. It is as wide as the card of its place in
+  every stage, so it does not jump as a run moves. Its rows are counted in the canvas a place
+  pages to, so nothing scrolls.
+- **The bar and the dock.** The bar says `1 update` or `2 updates` after the count of waits, and
+  `updating` while a run goes; the Settings word and tile of the dock hold a dot while an update
+  waits (skipped ones too), runs, or failed. The dot stands in the cell the word keeps spare, so
+  no width or row of the dock moves. The terminal says the count in its status line.
+- **Update** runs the Versions table's own press: `sandoq pane update` for the pane,
+  `sandoq room update NAME --json` for one disc, the same with no name for more than one (the pane
+  first, then the discs). For a new sandoq it runs `sandoq update --verified --json`, which holds
+  the pane too (the sign is asked for: no flag skips it); the discs of the room follow it. A
+  sandoq under 0.4.43 has no such word, so its sign says the version and has no Update. Update
+  taps nothing on the ask: the door would write that choice for the next start of sandoq, which
+  could take an older sha than the one now in.
+- **Updating.** The steps are read as sandoq prints them, on the pieces of the stream (an event
+  of the run, never a clock): each object it printed is a step done, its own line, with `✓`, the
+  last three; the newest `progress:` line of its error out stands under them with `●`. No bar is
+  drawn: sandoq gives no fraction to fill one by. No Cancel: the pane cannot stop a running
+  update, and the band says so.
+- **Done** says `NAME VERSION is in.` and the step's own after word where it has one (`Open a new
+  session to load it.`), with OK. **Not updated** says sandoq's own line (the last line of its
+  error out, else the first step that was not ok), with `Settings ›`, Not now and Try again, which
+  runs the same press again. A run that ends with no code says `Not known`: the pane does not
+  know whether it went in.
+- **Not now** sets what waits aside in memory and taps `Not now` on the ask as it always did. No
+  band stands; the dot stays; the Versions card lists each as `NAME VERSION skipped` with its
+  Update, and says that nothing asks again on its own. On a short pane the list is its rows
+  alone, with no note, so the table keeps its room. A session start forgets it.
+
+The Update of the band and the Update of the ask in the Room place differ: the first runs the
+update now, the second is the tap of the card, which sandoq takes at its next start. The Update of
+an offer made while no check was read runs without the restart flag the door of a unit may need:
+Check now first says it, as it does for the table.
 
 ## The three lenses
 

@@ -103,6 +103,8 @@ export type BarProps = {
   lens: string
   // What waits on him (his count of the desk): the tray says `N wait` in the warn tone before the door; none at zero or when not given.
   wait?: number
+  // What waits to be updated (order PF1): `1 update`, `2 updates` or `updating`, in the warn tone after the count of waits; '' says none.
+  update?: string
   // The door of the tray: lit while it runs, and its words ("door up", "door down", "no door in this room"; '' says none).
   doorUp: boolean
   doorWords: string
@@ -117,7 +119,7 @@ export const DOOR_READING = 'reading'
 // then `N wait` in the warn tone while something waits on him, then the door, a dot and its words. The date leaves under 64 columns and
 // the door's words under 48. No lens word stands while the lens is the plain one. (A press on the tray is a later still: a clear region
 // over it.)
-export function barView({ ui, columns, tones, room, seat, date, time, lens, wait = 0, doorUp, doorWords }: BarProps) {
+export function barView({ ui, columns, tones, room, seat, date, time, lens, wait = 0, update = '', doorUp, doorWords }: BarProps) {
   const { Box, Text } = ui
   const width = columns - 2 * EDGE
   const inner = width - 2 * SPACE.control - 2
@@ -180,6 +182,11 @@ export function barView({ ui, columns, tones, room, seat, date, time, lens, wait
             {`${wait} wait`}
           </Text>
         )}
+        {update !== '' && (
+          <Text key="tray-update" color={tones.warn} wrap="truncate-end">
+            {update}
+          </Text>
+        )}
         <Text key="tray-dot" color={doorWords === '' || doorWords === DOOR_READING ? tones.dim : doorUp ? tones.ok : tones.warn} wrap="truncate-end">
           ●
         </Text>
@@ -206,6 +213,8 @@ export type DockProps = {
   // The records new on the shelf since he last opened it (order T4a): the Shelf says it quietly, a dot on the tile and `Shelf: N new` in its
   // tip, `Shelf N new` in the words where the dock has the columns spare. None at zero, and none while the Shelf is the place lit.
   fresh?: number
+  // An update waits, runs or failed (order PF1): a dot on the Settings tile, `Settings ●` in the words.
+  settingsDot?: boolean
   actions: { open: (place: DockPlace) => void | Promise<void> }
 }
 
@@ -242,11 +251,11 @@ const BORDER = 1
 // (3 rows in one row of words, the word on the middle row, 2 rows in two rows of two) with the same clear region under it. THE OPEN WORD
 // has a rule, a line as wide as the word on the row under it, and the full ink; the others are dim with no rule, so the words never move
 // as the open place changes. model/dock.ts says the rows from the columns alone. No Button holds a hotkey.
-export function dockView({ ui, columns, tones, open, desk, seats, fresh = 0, actions }: DockProps) {
+export function dockView({ ui, columns, tones, open, desk, seats, fresh = 0, settingsDot = false, actions }: DockProps) {
   const { Box, Button, Text, Svg, Client } = ui
   const news = open === 'shelf' ? 0 : fresh
   const dock = dockOf(columns, tilesOn() && Svg !== undefined && Client !== undefined, news > 0)
-  const counts: Record<DockPlace, number> = { desk, seats, shelf: news, settings: 0 }
+  const counts: Record<DockPlace, number> = { desk, seats, shelf: news, settings: settingsDot ? 1 : 0 }
   const chip = { chip: tones.solid, ink: tones.text }
   // The clear region over a cell: a Client of the pane's own item module (hooks/item.tsx, a path from THIS file), placed over the cell,
   // that posts the press to the register. (`h` is the JSX factory of this file: no name of a size is `h`.)
@@ -308,6 +317,14 @@ export function dockView({ ui, columns, tones, open, desk, seats, fresh = 0, act
                   void actions.open(place)
                 }}
               />
+              {place === 'settings' && counts.settings > 0 && (
+                // An update waits, runs or failed (order PF1): the dot stands in the cell the word keeps spare, so no width and no row of the dock moves.
+                <Box key="word-dot-settings" position="absolute" top={dock.wordH === 3 ? 1 : 0} left={word.length}>
+                  <Text key="settings-dot" color={THEME.warn}>
+                    ●
+                  </Text>
+                </Box>
+              )}
               {lit && (
                 <Text key={`rule-${place}`} wrap="truncate-end">
                   {'─'.repeat(word.length)}

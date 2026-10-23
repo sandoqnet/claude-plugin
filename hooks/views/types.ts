@@ -15,7 +15,9 @@ import type { CatalogEntry, Disc } from '../model/shelf.ts'
 import type { ShelfFilesRead } from '../model/shelffiles.ts'
 import type { SeatShelf } from '../model/shelfreads.ts'
 import type { Card, Face, OpenAsk, WalkText } from '../model/walk.ts'
+import type { Flow } from '../model/updateflow'
 import type { SettingsSection } from './settingslist'
+import type { BandActs } from './updateband'
 import type { Plan } from './theme'
 import type { VersionsCard } from './versions'
 
@@ -248,6 +250,10 @@ export type PaneProps = {
   // The one plain line of a sandoq under the least the pane needs ("This pane needs sandoq 0.4.19 or later: run sandoq update."); the status line
   // says it after the late line. None when the sandoq was not read or is new enough.
   needWord?: string
+  // The update flow (order PF1): the band at the top of the card, the word in the bar and the dot on Settings, from model/updateflow.ts, and the acts the band's
+  // Buttons run (the register's). None when nothing waits to be updated.
+  flow?: Flow
+  flowActs?: BandActs
   // This session is the open seat of a joined room (order session open): the room, the seat, the last row a turn told ('' for none) and the one line of a
   // wake that stopped or a submit that was refused ('' for none). The seat card says it in two lines and a Shut. None when no seat is open.
   seatOpen?: { room: string; seat: string; last: string; note: string }

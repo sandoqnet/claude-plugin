@@ -56,8 +56,9 @@ import { seatWindowView, seatsView } from './seats'
 import { nudgeShown } from '../model/nudge'
 import { keysView, nudgeView, secretsView, settingsParts } from './settings'
 import { settingsListView } from './settingslist'
+import { bandView, skippedView } from './updateband'
 import { busyOf, versionsView } from './versions'
-import { wordRows, wrapRows } from './versions-table'
+import { FULL_FLOOR, wordRows, wrapRows } from './versions-table'
 import { shelfPlaceView, shelfRecordView, shelfRoomView } from './shelf'
 import { canvasWidthOf, layout, SPACE } from './space'
 import type { Plan } from './space'
@@ -590,6 +591,23 @@ export const lateShown = (state: Pick<RoomState, 'lateWord' | 'plan'>): string =
   const cut = `${words.slice(0, kept).join(' ')}…`
   return kept > 1 && fits(cut) ? cut : fitted(line, LATE_ROWS * inner)
 }
+// The update band (order PF1): its element at the width of the card, and the rows it takes with the gap under it. None when no band stands, or the acts are not given.
+// It stands in any place but two: the Room place and the Versions section of Settings say an update in their own words (the ask with its Update and Not now, the table with its
+// run, its lines and its Check now), so a band there would say it twice. The bar and the dot of the dock still say it there.
+const bandHere = (nav: Nav): boolean => nav.view !== 'room' && !(nav.view === 'settings' && nav.section === 'versions')
+// The rows the band takes are counted in the canvas a place pages to (canvasLeftOf), so no page of any place passes the canvas with it (tests/update-height.test.ts sweeps each page of
+// each place). The band holds the last three steps of a run, each cut to one row, and sandoq's own line cut to three, so it is never taller than a few rows.
+const bandOf = (state: RoomState, width: number) => {
+  const band = state.flow?.band
+  const acts = state.flowActs
+  if (band === undefined || acts === undefined || !bandHere(state.nav)) return undefined
+  return bandView({ ui: state.ui, surface: surfaceOf(state), band, inner: Math.max(1, width - 2 - 2 * SPACE.control), acts })
+}
+const bandRowsOf = (state: RoomState): number => {
+  if (!state.app) return 0
+  const node = bandOf(state, canvasWidthOf(state.plan))
+  return node === undefined ? 0 : sizeOf(node, canvasWidthOf(state.plan), namesOf(state.ui as any)).h + SPACE.block
+}
 const lateRowsOf = (state: RoomState): number => {
   const { lateWord = '', exists, plan } = state
   if (lateWord === '' || !exists) return 0
@@ -608,7 +626,7 @@ const canvasLeftOf = (state: RoomState, over: number): number =>
     ? Number.POSITIVE_INFINITY
     : !state.app
       ? Math.max(LINK_ROWS + 1, (state.termRoom as number) + LINK_ROWS)
-      : Math.max(LINK_ROWS + 1, canvasRowsOf(Math.max(LEAST_ROWS, state.rows), state.columns, over) - lateRowsOf(state))
+      : Math.max(LINK_ROWS + 1, canvasRowsOf(Math.max(LEAST_ROWS, state.rows), state.columns, over) - lateRowsOf(state) - bandRowsOf(state))
 const canvasRowsNow = (state: RoomState): number => canvasLeftOf(state, starterRowsOf(state))
 
 // The same without the door line: the canvas whole, for the body that carries the door line as its first block (it takes its rows on its page).
@@ -991,20 +1009,31 @@ const settingsPlace = (state: RoomState) => {
   // The card of Versions; with no card handed over it is not drawn. Its table takes the rows the body of a place has (the frame's one
   // count less the Back link), and none when the host gave no rows: then it has no limit and no pages.
   const card = state.versionsCard
+  // What Not now set aside stands over the Versions card, on its list (order PF1); the table's rows are what its card leaves.
+  // Where its full card would leave the table less than the full card's floor, the list is the compact one (its rows alone, no air and no note), so a short pane keeps its table.
+  const skippedOf = (compact: boolean) =>
+    card === undefined || state.flow === undefined || state.flowActs === undefined
+      ? []
+      : skippedView({ ui, surface: surfaceOf(state), width: state.layer, columns: state.columns, skipped: state.flow.skipped, acts: state.flowActs, compact })
+  const skippedRowsOf = (list: ReturnType<typeof skippedOf>) => (list.length === 0 ? 0 : sizeOf(list[0], state.layer, namesOf(ui as any)).h + SPACE.block)
+  const fullList = skippedOf(false)
+  const compactList = state.rows !== undefined && skippedRowsOf(fullList) > 0 && canvasRowsNow(state) - LINK_ROWS - skippedRowsOf(fullList) < FULL_FLOOR
+  const skippedCard = compactList ? skippedOf(true) : fullList
+  const skippedRows = skippedRowsOf(skippedCard)
   const versions =
     card === undefined
       ? []
-      : versionsView({
+      : [...skippedCard, ...versionsView({
           ui,
           ...frameOf(state),
           surface: surfaceOf(state),
           width: state.layer,
-          card: card.table === undefined || state.rows === undefined ? card : { ...card, table: { ...card.table, rows: canvasRowsNow(state) - LINK_ROWS } },
+          card: card.table === undefined || state.rows === undefined ? card : { ...card, table: { ...card.table, rows: canvasRowsNow(state) - LINK_ROWS - skippedRows } },
           onCheck: () => {
             void actions.checkVersions?.()
           },
           ...(app ? { onPlays: () => void actions.open({ view: 'room', card: 'plays' }) } : {}),
-        })
+        })]
   // The Secrets card (order S2): the names sandoq lists and the line of the one that is shown; with no card handed over it is not drawn.
   const secrets =
     state.secretsCard === undefined
@@ -1724,12 +1753,14 @@ function canvasView(state: RoomState, body: any[], failure: any, list?: any[]) {
         ]),
     failure,
   ]
+  // The update band stands first in the card, in any place (order PF1); a card of two columns holds it at the top of the list's.
   const shown = windowOpen ? body : []
   // EVERY card and window holds a strip of 3 rows (views/strip.tsx, order DP, P2): Back at the left where it is a row one step deep, the
   // title, Close at the right. From 128 columns the list stands at the left and its open row at the right, each card its own strip: the
   // left Close shuts the place, the right Close shuts the right card alone (the list stays), and the right card holds no Back, for the
   // place it came from is in view.
   const paired = windowOpen && list !== undefined && plan.cols === 2
+  const band = windowOpen ? bandOf(state, plan.width) : undefined
   if (!windowOpen && !said.some(item => item !== null)) return null
   const close = (id: string, press: () => void | Promise<void>, key?: string) => ({ id, press, ...(key === undefined ? {} : hotkeyProps(key)) })
   const shut = () => void state.actions.shut?.()
@@ -1758,6 +1789,7 @@ function canvasView(state: RoomState, body: any[], failure: any, list?: any[]) {
           <Box key="canvas-list" width={plan.width} flexDirection="column">
             {strip('top-strip-list', titleOf(state, listNav), { close: close(CLOSE_PLACE, shut, CLOSE_KEY) })}
             <Box key="list-body" flexDirection="column" gap={SPACE.block}>
+              {band}
               {list}
             </Box>
           </Box>
@@ -1769,7 +1801,7 @@ function canvasView(state: RoomState, body: any[], failure: any, list?: any[]) {
       ) : (
         <Box key="canvas-card" flexDirection="column">
           {strip('top-strip', titleOf(state, nav), { ...(back === undefined ? {} : { back }), close: close(CLOSE_PLACE, shut, CLOSE_KEY) })}
-          {bodyOf(shown)}
+          {bodyOf(band === undefined ? shown : [band, ...shown])}
         </Box>
       )}
     </Box>
@@ -1796,7 +1828,8 @@ export const waitsOnYouWords = (mine: number): string => (mine === 0 ? 'nothing 
 function statusWords(state: RoomState): string[] {
   const { cards, total, doorWord = '', lateWord = '', needWord = '', face, nav, walks, seatsText = '', seat = '', now, zone } = state
   // The terminal's count is the desk's own (Desk N in its tabs): the letters, the keeper's picks and his open items; on the level up the seats' waits stand with it.
-  if (face === 'public' && !state.app) return [lateWord, needWord, doorWord, deskWaitsLine(state, nav.view === 'level')].filter(part => part !== '')
+  const update = state.flow?.word ?? ''
+  if (face === 'public' && !state.app) return [lateWord, needWord, doorWord, update, deskWaitsLine(state, nav.view === 'level')].filter(part => part !== '')
   if (face === 'public') return [lateWord, needWord, doorWord, waitsLine({ walks, seatsText, seat, now, zone }, nav.view === 'level')].filter(part => part !== '')
   if (face === 'operator' && !state.app) return [lateWord, needWord, doorWord].filter(part => part !== '')
   return [lateWord, needWord, doorWord, countOf(total, 'card'), `$${costOf(cards).toFixed(2)} on these cards`].filter(part => part !== '')
@@ -1947,13 +1980,15 @@ export function paneView(props: PlaceProps) {
   // place is paged to what is left (state.termRoom). Small: the bar, the key line, and the place with its Back when one is open. Wide: the bar,
   // the tabs, the place, the status line.
   const frame = app ? undefined : terminalFrame(state)
+  // The update band (order PF1) stands over the terminal's place too, under the key line and the door line.
+  const bandTerminal = frame === undefined ? undefined : bandOf(state, bodyColumns)
   if (frame !== undefined && props.rows !== undefined) {
     const names = namesOf(ui as any)
     const rowsOf = (parts: any[]): number => parts.reduce((sum: number, part) => sum + sizeOf(part, bodyColumns, names).h, 0)
     // A BODY TOO SHORT FOR THE BAR (order mend terminal real, mend 6): when the rows the host gave are fewer than the bar and the key line need, the pane
     // draws the key line alone, one row, so a key still opens a place when the dock is opened bigger. (The bar holds its own rows, BAR_HEIGHT.)
     if (state.size === 'small' && props.rows < rowsOf([...bar, ...frame.top])) return <Box flexDirection="column">{frame.top}</Box>
-    state.termRoom = Math.max(1, props.rows - rowsOf([...bar, ...frame.top, failure, ...starterView(state), ...frame.back, ...frame.foot]))
+    state.termRoom = Math.max(1, props.rows - rowsOf([...bar, ...frame.top, failure, ...starterView(state), bandTerminal, ...frame.back, ...frame.foot]))
   }
   // NOTHING SCROLLS: a body longer than the canvas is paged by the block, or by the parts of its one card (views/paged.tsx). The places
   // that page themselves (the Seats place, a seat's window, Answered, a letter of the desk and its walk) fit their rows already. The terminal
@@ -1990,6 +2025,7 @@ export function paneView(props: PlaceProps) {
         {frame.top}
         {failure}
         {starterView(state)}
+        {bandTerminal}
         {frame.back}
         {faceBody}
         {frame.foot}
@@ -2027,10 +2063,11 @@ export function paneView(props: PlaceProps) {
         time: clockText(now, zone),
         lens: face === 'public' ? '' : cap(face),
         wait: waiting,
+        update: props.flow?.word ?? '',
         doorUp: isDoorUp,
         doorWords: props.doorWord ?? '',
       })}
-      {dockView({ ui, columns: bodyColumns, tones, open, desk: waiting, seats: seatsWaiting, fresh, actions: { open: pressed } })}
+      {dockView({ ui, columns: bodyColumns, tones, open, desk: waiting, seats: seatsWaiting, fresh, settingsDot: props.flow?.dot === true, actions: { open: pressed } })}
     </Box>
   )
 }

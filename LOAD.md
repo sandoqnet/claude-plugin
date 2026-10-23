@@ -1,4 +1,4 @@
-# Load room-pane 0.8.82 (checked on Claude Code v2.1.290)
+# Load room-pane 0.8.83 (checked on Claude Code v2.1.290)
 
 ## What it needs
 
@@ -28,7 +28,7 @@ X.Y.Z is the pane's version, the one `/plugin` shows after the install.
    source. Remove that marketplace: `claude plugin marketplace remove sandoq`. Then quit the
    desktop app and open it again. When `sandoq` comes from GitHub, nothing old stands: skip this
    step, and never run `claude plugin uninstall sandoq@sandoq`, for that is this pane.
-1. In a terminal run `claude plugin marketplace add sandoqnet/claude-plugin#pane-v0.8.82`. For
+1. In a terminal run `claude plugin marketplace add sandoqnet/claude-plugin#pane-v0.8.83`. For
    another release, say its tag: `pane-v` and the version.
 2. Run `claude plugin install sandoq@sandoq`. It may say that three user config options are not
    yet set. All three are optional, and each is right when left empty:
@@ -57,17 +57,19 @@ in `settings.json`. If `/sandoq` is no command after that, use the marketplace.
 In the desktop app, Settings holds the card Versions, a table: its first line is the pane's own, then
 each disc of the room, with the version here, the version there and a state. "Check now" reads the
 states. A line has the Button "Update" where an update waits, and the pane's line has it while its
-state is not known: that Button runs `sandoq pane update`. When it ends, open a new session to load
+state is not known: that Button runs `sandoq pane update`. The Update of the band at the top of a
+place, where a new sandoq waits, runs `sandoq update --verified --json` (sandoq, the player, the discs
+and the pane; a signed release alone), from sandoq 0.4.43. When it ends, open a new session to load
 it: the app needs no restart.
 
 1. In a terminal run `sandoq update`, or by hand `claude plugin marketplace update sandoq` and then
    `claude plugin update sandoq@sandoq`. With the developer way, replace the folder named in
    `CLAUDE_CODE_PLUGIN_DIRS`.
 2. Open a new session. After an update `/sandoq` is no command in a session that began before it.
-3. Check the version with `/plugin` (Installed tab): it is 0.8.82. The Operator lens says it too, at
-   its foot: "pane 0.8.82 · draws N · scene N".
+3. Check the version with `/plugin` (Installed tab): it is 0.8.83. The Operator lens says it too, at
+   its foot: "pane 0.8.83 · draws N · scene N".
 
-An install of 0.8.81 takes no update while the number is the same, so the number moved to 0.8.82.
+An install of 0.8.82 takes no update while the number is the same, so the number moved to 0.8.83.
 
 ## Renew a pane that stands
 
@@ -84,7 +86,7 @@ and then `claude plugin install sandoq@sandoq`.
 3. When the source is another one, such as a folder: run `claude plugin marketplace remove sandoq`,
    then do the install steps from the top (step 0 says what the folder one may hold), then open a
    new session.
-4. Check: `/plugin` says 0.8.82, and the Operator lens says "pane 0.8.82" at its foot.
+4. Check: `/plugin` says 0.8.83, and the Operator lens says "pane 0.8.83" at its foot.
 
 Claude keeps the options `bridge`, `gate` and `sandoq` by plugin id, so a move loses the ones you
 set by hand: set them again after the move. A pane that you turned off stays off.

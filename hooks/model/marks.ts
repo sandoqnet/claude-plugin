@@ -55,9 +55,12 @@ export function tileOf(place: DockSlot, count: number, lit: boolean, tones: Tile
   // The Shelf's mark (order T4a): a small dot in the dim tone on the plate's corner, no numeral, no amber: its count is in the tip.
   const dot = `<circle cx="${cx}" cy="${cy}" r="3.5" fill="${tones.dim ?? tones.text}" stroke="${tones.solid}" stroke-width="1.5"/>`
   const badge =
-    count <= 0 || place === 'settings'
+    count <= 0
       ? ''
-      : place === 'shelf'
+      : place === 'settings'
+        ? // An update waits, runs or failed (order PF1): a small amber dot on the corner, no numeral.
+          `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#f2b65a" stroke="#955800" stroke-width="1.5"/>`
+        : place === 'shelf'
         ? dot
         : place === 'desk'
           ? `<circle cx="${cx}" cy="${cy}" r="7" fill="#f2b65a" stroke="#955800" stroke-width="1.5"/><text x="${cx}" y="${base}" ${word} fill="#1a1a19">${shown}</text>`
@@ -86,6 +89,8 @@ export function tileTip(place: DockSlot, count: number, lit: boolean): string {
           ? count > 0
             ? `Shelf: ${count} new`
             : 'The shelf'
-          : 'Settings'
+          : count > 0
+            ? 'Settings: an update waits'
+            : 'Settings'
   return lit ? `${words} · open` : words
 }

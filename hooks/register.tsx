@@ -35,6 +35,7 @@ import {
   paneNeedsLine,
   programsPath,
   roomAppHas,
+  SANDOQ_UPDATE_FROM,
   roomAppVersionArgv,
   roomFileArgv,
   roomFilesArgv,
@@ -47,6 +48,7 @@ import {
   secretListArgv,
   updateCheckArgv,
   updatePaneArgv,
+  updateSandoqArgv,
   urTapArgv,
   urWalkPath,
   readCached,
@@ -133,7 +135,7 @@ import { lastLineOf, parseSecretList } from './model/secrets'
 import type { SecretRow, SecretsCard } from './model/secrets'
 import { freshFeed, parseFeed, shapeAsks, whereWords } from './model/roomfeed'
 import type { FeedEntry } from './model/roomfeed'
-import { discsOf, doorOf, programsOf, sizeOf } from './model/roomplace'
+import { discsOf, doorOf, programsOf, sizeOf, updateOf } from './model/roomplace'
 import { DOOR_NOT_READ, DOOR_REFUSED, DOOR_UNKNOWN, ROOM_NOT_READ, ROOM_REFUSED, ROOM_TOO_OLD, ROOM_UNKNOWN, roomNameOf, roomStartOf, whereOf } from './model/roomstart'
 import { seatFace, waitKey, waitsOnHim } from './model/seat'
 import {
@@ -179,6 +181,8 @@ import type { SeatShelf } from './model/shelfreads'
 import { groundsOf, hourFor, paneRows } from './model/scene'
 import { afterLine, checkedSteps, doorNotUp, doorOfCheck, isNoClaude, isPaneRestart, paneStepOf, readSteps, stepLines, waits, withoutProgress, wordOf as stateWord } from './model/steps'
 import type { Door, Step } from './model/steps'
+import { flowOf, isSettled, settledKey, signKey, signsOf } from './model/updateflow'
+import type { Done, Outcome, Sign } from './model/updateflow'
 import { peekNamed, peekOf, seatBandLine } from './model/seatband'
 import type { Peek } from './model/seatband'
 import { DEFAULT_FACE, FACES, INDENT, openAsks, parseWalk, waitingLine } from './model/walk'
@@ -204,6 +208,7 @@ import { tilesOn } from './views/tiles'
 import { layout } from './views/space'
 import type { Actions, Card, DiscChecks, Face, Maker, Nav, Starter, UrWindow, WalkText } from './views/types'
 import type { CheckResult, UpdateResult, VersionsCard } from './views/versions'
+import type { BandActs } from './views/updateband'
 
 const PANE = 'room'
 // A card's file in the gate's walks folder: its ULID, then .md.
@@ -657,7 +662,7 @@ async function runWithin($, argv: string[], ms: number, what: string): Promise<{
 // stream are gathered into what the card reads: a piece is an object with the name of its stream and its text (a string alone is
 // the out); the end of the stream gives the code. The late end of a run past the pane's limit is dropped, as for any run, and the
 // pane never stops the run: the stream is read to its end and not returned.
-export async function gather(child: AsyncIterable<unknown>): Promise<{ exitCode?: number; stdout?: string; stderr?: string }> {
+export async function gather(child: AsyncIterable<unknown>, watch?: (stream: 'out' | 'err', text: string) => void): Promise<{ exitCode?: number; stdout?: string; stderr?: string }> {
   const out: string[] = []
   const err: string[] = []
   const stream = child[Symbol.asyncIterator]()
@@ -668,15 +673,20 @@ export async function gather(child: AsyncIterable<unknown>): Promise<{ exitCode?
       return { exitCode: typeof code === 'number' ? code : undefined, stdout: out.join(''), stderr: err.join('') }
     }
     const piece = step.value as string | { stream?: unknown; text?: unknown } | undefined
-    if (typeof piece === 'string') out.push(piece)
-    else if (typeof piece?.text === 'string') (piece.stream === 'stderr' ? err : out).push(piece.text)
+    if (typeof piece === 'string') {
+      out.push(piece)
+      watch?.('out', piece)
+    } else if (typeof piece?.text === 'string') {
+      (piece.stream === 'stderr' ? err : out).push(piece.text)
+      watch?.(piece.stream === 'stderr' ? 'err' : 'out', piece.text)
+    }
   }
 }
 
-async function spawnWithin($, argv: string[], ms: number, what: string): Promise<{ exitCode?: number; stdout?: string; stderr?: string }> {
+async function spawnWithin($, argv: string[], ms: number, what: string, watch?: (stream: 'out' | 'err', text: string) => void): Promise<{ exitCode?: number; stdout?: string; stderr?: string }> {
   const ran = async () => {
     try {
-      return await gather($.process.spawn({ argv }))
+      return await gather($.process.spawn({ argv }), watch)
     } catch (error) {
       throw cutOf(error, what)
     }
@@ -803,7 +813,7 @@ async function checkVersions($): Promise<void> {
 }
 
 // The update of the pane (pane 0.7.11): "Update the pane" on the pane's own line of the card runs sandoq pane update, one process
-// with its own limit, on the press alone: never in a poll, never at a draw. It is the only update the pane runs (the checks above
+// with its own limit, on the press alone: never in a poll, never at a draw. It is one of the three updates the pane runs (a disc's, and sandoq's own by the band's Update; the checks above
 // hold the word --check). It changes nothing of the room and stops no door. Like the check, its answer is the memory of the session.
 let update: UpdateResult = { state: 'rest', lines: [], plain: '' }
 let updateRun = 0
@@ -996,38 +1006,111 @@ const starterNow = ($): Starter | undefined =>
 // update. One command at a time, on the press alone, each with its own limit (host.ts limitOf: one disc waits for a press on one name,
 // the count of the waits for Update all). While it runs the card holds no Update and no Check Button. After its answer the table is
 // drawn again from a new check, and ONE plain line says what is left (by the `after` key of the objects of THIS run alone).
-type Press = { kind: 'pane' } | { kind: 'room'; name: string }
+type Press = { kind: 'pane' } | { kind: 'room'; name: string } | { kind: 'sandoq' }
 
-async function pressUpdate($, press: Press): Promise<void> {
-  if (update.state === 'updating' || check.state === 'checking' || noSandoq()) return
+// THE UPDATE FLOW (order PF1): the band at the top of the card, in any place, the word in the bar and the dot on Settings say what waits to be updated
+// (model/updateflow.ts). Memory of the session, forgotten at its start: what Not now set aside (its signs, so the Versions card keeps them on its list), what
+// an update of this session took in (an ask of an offer stays open on the walks: the pane taps nothing on Update, for the door would write the offer's sha
+// for the NEXT START, which could take an older one than the one now in; so the disc a run took in is no sign), the steps of the run that goes, how the last
+// run ended, and what it was for (Try again runs the same press). The press is the Versions table's own (pressUpdate): no argv is new.
+let skipped: Sign[] = []
+let settled: string[] = []
+let live: { signs: Sign[]; steps: Done[]; newest: string } | undefined
+let outcome: Outcome | undefined
+let lastPress: { press: Press; signs: Sign[] } | undefined
+const forgetFlow = () => {
+  skipped = []
+  settled = []
+  live = undefined
+  outcome = undefined
+  lastPress = undefined
+}
+
+// What waits to be updated, as the pane knows it now: the open ask of an offer on the walks and the steps of the last check. A sign has an Update only where
+// a sandoq stands to run it.
+const signsNow = (): Sign[] =>
+  signsOf({ ask: updateOf(snap.walks), installed: discsOf(snap.discsText).map(disc => ({ name: disc.name, version: disc.version })), steps: table.steps, settled }).map(sign =>
+    noSandoq() ? { ...sign, runs: false } : sign.noun === 'sandoq' ? { ...sign, runs: sandoqTakesVerified() } : sign,
+  )
+
+// A sandoq that has the word `--verified` of `sandoq update` (SANDOQ_UPDATE_FROM): by the version the pane read of it; none read says no.
+const sandoqTakesVerified = (): boolean => roomApp !== undefined && roomApp.sandoq === host.sandoq && roomAppHas(roomApp.said, SANDOQ_UPDATE_FROM)
+
+// What Not now set aside, less what is in since: a version the room plays, or one a run of this session took in.
+const skippedNow = (): Sign[] => {
+  const discs = discsOf(snap.discsText)
+  return skipped.filter(sign => !isSettled(settled, sign) && !(sign.noun === 'disc' && discs.some(disc => disc.name === sign.name && disc.version === sign.version)) && !(sign.noun === 'pane' && sign.version === VERSION))
+}
+
+const flowNow = () => flowOf({ signs: signsNow(), skipped: skippedNow(), running: live, outcome })
+
+// The signs a press is for: the pane's, a disc's by its name, or each disc that waits; a press the card made with no sign read has its name alone.
+const signsOfPress = (press: Press): Sign[] => {
+  const signs = signsNow()
+  if (press.kind === 'pane') return signs.filter(sign => sign.noun === 'pane').concat(signs.some(sign => sign.noun === 'pane') ? [] : [{ noun: 'pane', name: 'pane', version: '', page: '', runs: true }])
+  if (press.kind === 'sandoq') return signs.filter(sign => sign.noun === 'sandoq').concat(signs.some(sign => sign.noun === 'sandoq') ? [] : [{ noun: 'sandoq', name: 'sandoq', version: '', page: '', runs: true }])
+  const discs = signs.filter(sign => sign.noun === 'disc')
+  if (press.name === '') return discs
+  return discs.filter(sign => sign.name === press.name).concat(discs.some(sign => sign.name === press.name) ? [] : [{ noun: 'disc', name: press.name, version: '', page: '', runs: true }])
+}
+
+async function pressUpdate($, press: Press): Promise<boolean> {
+  if (update.state === 'updating' || check.state === 'checking' || noSandoq()) return false
   // The name comes from the out of a check: it is tested before anything runs, so a name that holds a sign a name does not never
   // reaches an argv.
   if (press.kind === 'room' && press.name !== '' && !DISC_NAME.test(press.name)) {
     $.ui.toast('room: nothing was updated, the name of the disc holds a sign that a name does not')
-    return
+    return false
   }
   const restart = press.kind === 'room' && table.door === 'would-restart'
   const waiting = press.kind === 'room' ? (press.name === '' ? table.steps.filter(step => step.noun === 'disc' && waits(step)).length : 1) : 0
-  const argv = press.kind === 'pane' ? updatePaneArgv(host) : roomUpdateArgv(host, press.name, restart)
-  const name = press.kind === 'pane' ? 'sandoq pane update' : 'sandoq room update'
+  const argv = press.kind === 'pane' ? updatePaneArgv(host) : press.kind === 'sandoq' ? updateSandoqArgv(host) : roomUpdateArgv(host, press.name, restart)
+  const name = press.kind === 'pane' ? 'sandoq pane update' : press.kind === 'sandoq' ? 'sandoq update' : 'sandoq room update'
   const run = (updateRun += 1)
+  const signs = signsOfPress(press)
+  lastPress = { press, signs }
+  outcome = undefined
+  skipped = skipped.filter(sign => !signs.some(one => signKey(one) === signKey(sign)))
+  live = { signs, steps: [], newest: '' }
   update = { state: 'updating', lines: [], plain: '' }
-  running = { what: press.kind === 'pane' ? 'the pane' : press.name === '' ? 'each disc' : press.name, restart }
+  running = { what: press.kind === 'pane' ? 'the pane' : press.kind === 'sandoq' ? 'sandoq' : press.name === '' ? 'each disc' : press.name, restart }
   ran = { notes: [], doorNotUp: false }
   tableFold = false
   tablePage = 0
   tableLinesPage = 0
   $.ui.invalidate('ui.render')
+  // The steps are read as sandoq prints them, on the pieces of the stream (an event of the run, no clock): each object a step it printed is a step done, and the newest
+  // `progress:` line of its err is where it is now. No fraction is read, so no bar is drawn.
+  let seen = ''
+  const watch = (stream: 'out' | 'err', text: string): void => {
+    if (live === undefined || run !== updateRun) return
+    if (stream === 'out') {
+      seen += text
+      live = { ...live, steps: readSteps(seen).steps.filter(step => step.line !== '').map(step => ({ line: scrub(step.line), ok: step.ok })) }
+    } else {
+      const newest = text.split('\n').map(line => line.trim()).filter(line => /^progress: /.test(line)).at(-1)
+      if (newest !== undefined) live = { ...live, newest: scrub(newest.replace(/^progress: /, '')) }
+    }
+    $.ui.invalidate('ui.render')
+  }
+  let ended: Outcome | undefined
   try {
     // An update goes by spawn, as the pane's own does (runUpdate): a run past its limit is left running, never stopped.
-    const answer = await spawnWithin($, argv, press.kind === 'pane' ? limitOf('pane') : limitOf('room', waiting, restart), name)
-    if (run !== updateRun) return
+    const answer = await spawnWithin($, argv, press.kind === 'pane' ? limitOf('pane') : press.kind === 'sandoq' ? limitOf('sandoq') : limitOf('room', waiting, restart), name, watch)
+    if (run !== updateRun) return false
     const code = answer.exitCode
     const read = readSteps(answer.stdout ?? '')
     const last = streamLines(withoutProgress(answer.stderr)).at(-1) ?? ''
     const said = streamLines([...read.steps.map(step => step.line), ...read.plain].join('\n'))
     const rest = said.length - MAX_CHECK_LINES
     const lines = rest > 0 ? [...said.slice(0, MAX_CHECK_LINES), `…and ${rest} more lines`] : said
+    // How the run ended, for the band: exit 0 is in (and the step's own `after` word where it has one), a code that is not 0 is sandoq's own line, no code is not known.
+    ended =
+      code === 0
+        ? { kind: 'done', signs, line: '', after: read.steps.length === 0 ? (press.kind === 'pane' ? UPDATE_DONE : '') : afterLine(read.steps) }
+        : typeof code === 'number'
+          ? { kind: 'failed', signs, line: last !== '' ? last : read.steps.find(step => !step.ok && step.line !== '')?.line ?? lines[0] ?? `it exited ${code}`, after: '' }
+          : { kind: 'unknown', signs, line: said.length === 0 ? UPDATE_UNREAD : UPDATE_UNKNOWN, after: '' }
     if (code === undefined && said.length === 0) {
       // A stream with no code and no line is not the shape the pane reads: it says so, and the check that follows tells what stands.
       ran = { notes: [UPDATE_UNREAD], doorNotUp: false }
@@ -1052,18 +1135,72 @@ async function pressUpdate($, press: Press): Promise<void> {
       update = { state: 'rest', lines: [], plain: '' }
     }
   } catch (error) {
-    if (run !== updateRun) return
-    ran = {
-      notes: [isUnanswered(error) ? UPDATE_UNKNOWN : `${name} did not run: ${scrub(String(error)).slice(0, 160)}`],
-      doorNotUp: false,
-    }
+    if (run !== updateRun) return false
+    const told = isUnanswered(error) ? UPDATE_UNKNOWN : `${name} did not run: ${scrub(String(error)).slice(0, 160)}`
+    ran = { notes: [told], doorNotUp: false }
+    ended = { kind: 'unknown', signs, line: told, after: '' }
     update = { state: 'rest', lines: [], plain: '' }
   }
   running = undefined
+  live = undefined
+  outcome = ended
+  if (ended?.kind === 'done') settled = [...settled, ...signs.map(settledKey)]
   discsWanted = true
   $.ui.invalidate('ui.render')
   await doCheck($)
+  return ended?.kind === 'done'
 }
+
+// The band's Update (order PF1) is the Versions table's own press where it has one: the pane first where it waits, then the discs that wait, one by its name and more with
+// none (Update all). Sandoq itself is the one press that is new (his word, Q282): `sandoq update --verified --json`, which holds the pane too (sandoq, the player, the
+// discs, the pane, the door), so a pane that waits with it is not pressed again. A run that did not go in stops the chain, and its band is the one that stands. On the
+// press alone, never by itself.
+async function pressBand($): Promise<void> {
+  const keys = skippedNow().map(signKey)
+  const pending = signsNow().filter(sign => !keys.includes(signKey(sign)) && sign.runs)
+  const discs = pending.filter(sign => sign.noun === 'disc')
+  const own = pending.some(sign => sign.noun === 'sandoq')
+  const presses: Press[] = [...(own ? [{ kind: 'sandoq' } as Press] : pending.some(sign => sign.noun === 'pane') ? [{ kind: 'pane' } as Press] : []), ...(discs.length === 0 ? [] : [{ kind: 'room', name: discs.length === 1 ? discs[0]!.name : '' } as Press])]
+  const afters: string[] = []
+  for (const press of presses) {
+    if (!(await pressUpdate($, press))) return
+    afters.push(outcome?.after ?? '')
+  }
+  if (presses.length > 1) {
+    outcome = { kind: 'done', signs: pending, line: '', after: afters.filter(after => after !== '').at(-1) ?? '' }
+    $.ui.invalidate('ui.render')
+  }
+}
+
+// The band's Not now: what waits is set aside in memory (its signs stay on the Versions card and the dot stays on Settings), and an ask of an offer on the walks is
+// tapped Not now as it always was. Nothing asks again on its own.
+async function notNowBand($): Promise<void> {
+  const keys = skippedNow().map(signKey)
+  const pending = signsNow().filter(sign => !keys.includes(signKey(sign)))
+  outcome = undefined
+  skipped = [...skippedNow(), ...pending]
+  $.ui.invalidate('ui.render')
+  const ask = updateOf(snap.walks)
+  if (ask !== undefined) await sendTap($, ask.cardId, 'Not now')
+}
+
+const flowActsOf = ($): BandActs => ({
+  update: () => void pressBand($),
+  notNow: () => void notNowBand($),
+  ok: () => {
+    outcome = undefined
+    $.ui.invalidate('ui.render')
+  },
+  tryAgain: () => {
+    if (lastPress !== undefined) void pressUpdate($, lastPress.press)
+  },
+  openPage: page => openPage($, page),
+  settings: () => void openNav($, { view: 'settings', section: 'versions' }),
+  updateSkipped: at => {
+    const sign = skippedNow()[at]
+    if (sign?.runs === true) void pressUpdate($, sign.noun === 'pane' ? { kind: 'pane' } : sign.noun === 'sandoq' ? { kind: 'sandoq' } : { kind: 'room', name: sign.name })
+  },
+})
 
 // "Start the door", after a run that left the door down: what Put it up runs today, then the table is drawn again.
 async function startTheDoor($): Promise<void> {
@@ -4182,6 +4319,8 @@ const paneOf = ($, e) => {
     bridgeOff: isBridgeOff(envOf()),
     lateWord: lateLine(),
     needWord: needLine(),
+    flow: flowNow(),
+    flowActs: flowActsOf($),
     ...(seatOpen === undefined ? {} : { seatOpen: { room: seatOpen.room, seat: seatOpen.seat, last: seatOpen.last, note: seatOpen.note } }),
     cards: snap.cards,
     current: snap.cards.find(card => card.id === openId),
@@ -4360,6 +4499,7 @@ export const register: Register = on => {
     checkRun += 1
     update = { state: 'rest', lines: [], plain: '' }
     updateRun += 1
+    forgetFlow()
     // The call that makes a room and the call that starts a door (order MR): one out at the old session is dropped, and what it left with it.
     // The door's state and the door found are forgotten above.
     make = NO_MAKE

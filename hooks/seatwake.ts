@@ -1,24 +1,30 @@
 // The seat with no pane host (a local or cloud session with the plugin and no pane). With no pane host the kit module does not load, but a command hook and a
-// markdown command do. From sandoq 0.4.28 the program keeps the seat of a folder and does the wake; this file keeps nothing of its own. Two roads, one file:
+// markdown command do. From sandoq 0.4.28 the program keeps the seat of a folder and does the wake; this file keeps nothing of its own. Three roads, one file:
 //   `node seatwake.ts do WORDS`   the inline line of the commands seat-open.md and seat-shut.md: `open ROOM [SEAT]` runs `sandoq room seat ROOM [SEAT]`, `shut` runs
 //                                 `sandoq room seat off`. It prints ONE line (sandoq's own, or the one that says why nothing ran) and exits 0. WORDS is `-` when the
 //                                 words of the user are on the input (a quoted heredoc, so no shell reads them); they reach the program as argv words only.
 //   `node seatwake.ts wake`       an asyncRewake command hook on Stop and SessionStart: a pass-through to `sandoq room wake --hook`. The hook's JSON on its input
 //                                 goes to sandoq as it came; a real wake (exit 2, the rows on the err) comes back whole and wakes the idle session. A usage error or any
 //                                 exit that is not a wake is silent, exit 0. No sandoq, or one under WAKE_HOOK_FROM: exit 0 at once, in silence. No state, no lock, no turn text.
+//   `node seatwake.ts hear prompt|stop`  a plain command hook (no asyncRewake) on UserPromptSubmit (prompt) and on Stop (stop): a pass-through to `sandoq room hear --hook`,
+//                                 which says the person's words and the seat's answer to the room. The hook's JSON on its input goes to sandoq as it came, and sandoq's out (one
+//                                 json line, the systemMessage of a fault) comes back whole. Every exit is 0: an exit 2 on UserPromptSubmit would block his prompt. No sandoq, one
+//                                 under HEAR_HOOK_FROM (prompt) or HEAR_STOP_FROM (stop), or any other word: exit 0 at once, in silence. The plugin reads no prompt.
 // A folder with no entry in sandoq is silence, so in the desktop app, where the pane's own seat writes no entry, the hook never wakes twice.
 import { spawn, spawnSync } from 'node:child_process'
 import type { SpawnSyncReturns } from 'node:child_process'
 import { statSync } from 'node:fs'
 
 import { findSandoq } from './bridge.ts'
-import { SEAT_FOLDER_FROM, folderSeatArgv, folderSeatOffArgv, folderWakeHookArgv, roomAppHas, sandoqVersionArgv, wakeExitOf, WAKE_HOOK_FROM } from './host.ts'
+import { SEAT_FOLDER_FROM, folderHearHookArgv, folderSeatArgv, folderSeatOffArgv, folderWakeHookArgv, hearFromOf, hearOutOf, roomAppHas, sandoqVersionArgv, wakeExitOf, WAKE_HOOK_FROM } from './host.ts'
 import { SEAT_COMMAND_USAGE, SEAT_NO_SANDOQ, commandWordsOf, seatNeedsLine } from './model/sessionseat.ts'
 
 const VERSION_MS = 5000
 const SEAT_MS = 15000
 const LINE_LIMIT = 200
 const WORDS_LIMIT = 200
+// The hear hook's own bound, under the 30 seconds of its timeout with the version read: a run past it ends quiet.
+const HEAR_MS = 22000
 
 const isFile = (path: string): boolean => {
   try {
@@ -77,6 +83,29 @@ function wake(): Promise<number> {
   })
 }
 
+// ---- the hear hook: a pass-through like the wake, but sandoq's out goes back whole, and the exit is 0 in every case.
+function hear(word: string | undefined): Promise<number> {
+  const from = hearFromOf(word)
+  if (from === undefined) return Promise.resolve(0)
+  const sandoq = findSandoq(process.env, isFile)
+  if (sandoq === undefined || !hasVersion(sandoq, from)) return Promise.resolve(0)
+  return new Promise(resolve => {
+    const [program, ...args] = folderHearHookArgv(sandoq)
+    const child = spawn(program, args, { stdio: ['inherit', 'pipe', 'ignore'] })
+    let out = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', chunk => (out += chunk))
+    const bound = setTimeout(() => child.kill('SIGTERM'), HEAR_MS)
+    child.on('error', () => resolve(0))
+    child.on('close', code => {
+      clearTimeout(bound)
+      process.stdout.write(hearOutOf(code, out))
+      resolve(0)
+    })
+    for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.on(signal, () => child.kill('SIGTERM'))
+  })
+}
+
 // The words of a command come on the input, never in the shell line: the first line only, cut at WORDS_LIMIT.
 const firstLine = (text: string): string => (text.split('\n')[0] ?? '').slice(0, WORDS_LIMIT)
 
@@ -96,6 +125,7 @@ async function main(): Promise<number> {
     process.stdout.write(`${seatLine(words)}\n`)
     return 0
   }
+  if (process.argv[2] === 'hear') return hear(process.argv[3])
   return process.argv[2] === 'wake' ? wake() : 0
 }
 

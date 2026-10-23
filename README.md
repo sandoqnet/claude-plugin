@@ -1,4 +1,4 @@
-# room-pane 0.8.78
+# room-pane 0.8.79
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -150,6 +150,14 @@ folder with no entry, or a wake that runs, is silence. A usage error, or any exi
 wake, is silent, exit 0. No sandoq, or one under 0.4.29, is exit 0 and silence (the seat verbs
 need 0.4.28). The pane's own `/sandoq open` writes no folder entry, so the hook stays silent in the
 desktop app; the pane opened in a folder that sandoq seats says one line and opens no second wake.
+The hear hook is a third road of the same script: a plain command hook (no asyncRewake, timeout 30)
+`node hooks/seatwake.ts hear prompt` on UserPromptSubmit and `hear stop` on Stop, a pass-through to
+`sandoq room hear --hook`, which says the person's words and the seat's answer to the room. The
+hook's input goes to sandoq as it came (the plugin reads no prompt: the wake turn, a slash command,
+an empty prompt and a private one, which opens with two dashes, are sandoq's to skip), and sandoq's
+out, one json line, comes back whole when the run ended with 0. Every exit is 0, since an exit 2 on
+UserPromptSubmit would block the prompt. No sandoq, one under 0.4.44 (prompt) or 0.4.45 (stop), or
+any other word, is exit 0 and silence. The hook.ts groups and the wake group on Stop stand.
 The rules of the seat are the skill `sandoq-seat`, not the commands.
 The seat's say is a Bash command, which a session may ask about: the rule `Bash(sandoq room say:*)`
 in the project's permissions lets it run; nothing in the plugin writes settings. Not seen yet: a
@@ -336,7 +344,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.78 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.79 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,

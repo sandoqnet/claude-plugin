@@ -34,7 +34,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.78'
+export const VERSION = '0.8.79'
 // The channel the pane runs in: `prod` in the released pane; .kairos/devpane/refresh.sh makes it `dev` in the dev copy. The status line says it.
 export const CHANNEL = 'prod'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
@@ -213,6 +213,17 @@ export const folderWakeHookArgv = (sandoq: string): string[] => [sandoq, ROOM_NO
 // So 2 only when the code is 2 and no line of the err opens with the usage line; any other case (usage, exit 1, a signal, no code, exit 0) is 0.
 export const wakeExitOf = (code: number | null, err: string): number =>
   code === 2 && !err.split('\n').some(line => line.trim().startsWith('usage: sandoq')) ? 2 : 0
+// THE HEAR HOOK: `room hear --hook` says the person's words (UserPromptSubmit) and the seat's answer (Stop) to the room; sandoq reads hook_event_name in the host's JSON,
+// so the one verb serves both. The prompt side stands from HEAR_HOOK_FROM, the Stop side from HEAR_STOP_FROM (a Stop to 0.4.44 is exit 0 and silent). The plugin reads no
+// prompt: the wake turn, a slash command, an empty prompt and a private one (two dashes first) are sandoq's to skip.
+export const HEAR_HOOK_FROM = '0.4.44'
+export const HEAR_STOP_FROM = '0.4.45'
+export const folderHearHookArgv = (sandoq: string): string[] => [sandoq, ROOM_NOUN, 'hear', '--hook']
+// The version a word after `hear` needs; any other word has none and the hook runs nothing.
+export const hearFromOf = (word: string | undefined): string | undefined => (word === 'prompt' ? HEAR_HOOK_FROM : word === 'stop' ? HEAR_STOP_FROM : undefined)
+// What of sandoq's out goes back: the whole out of a run that ended with code 0, else nothing. The hook's own exit is 0 whatever sandoq did, since an exit 2 on
+// UserPromptSubmit blocks his prompt; an out that is not one json line of a fault would be read as context, so it never goes back from a run that did not end well.
+export const hearOutOf = (code: number | null, out: string): string => (code === 0 ? out : '')
 const SEAT_SESSION_FLAG = '--session'
 // The wake: `room wake ROOM --next --seat SEAT --json` passes until a pass holds a row of SEAT, prints that pass's rows of SEAT, one json object a line
 // ({r, seat, seq, line}), and exits 0. It is the pane's own process (spawned, never a Bash call of Claude) and has no limit: it ends with rows, or when

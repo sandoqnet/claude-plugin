@@ -196,7 +196,30 @@ export type Ui = { Box: any; Text: any; Button: any; Input: any; Markdown: any; 
 // (the last two parts of the session's folder), whether the call runs, the one line the last call left (whole: the draw cuts it at a word
 // and the read tool says it whole), whether that line is the pane's own (drawn in more rows) or sandoq's, whether the Button stands,
 // and its press. None where no room may be made from here.
-export type Maker = { name: string; where: string; making: boolean; line: string; own: boolean; button: boolean; onMake: () => void }
+export type Maker = {
+  name: string
+  where: string
+  making: boolean
+  line: string
+  own: boolean
+  button: boolean
+  onMake: () => void
+  // The room flow (order PF2): the step the pane is at (`rest` is the Button), the name typed so far, the line a name that does not fit says, what the call said
+  // once it ended (only then is a step of the making done), and the presses of the steps: the draft of the Input, Next with the typed name, Back, Cancel, and Make the room.
+  step: 'rest' | 'name' | 'confirm' | 'making'
+  typed: string
+  fault: string
+  ended: boolean
+  door: 'up' | 'none' | 'unknown'
+  onDraft: (text: string) => void
+  onNext: (text: string) => void
+  onBack: () => void
+  onCancel: () => void
+  onGo: () => void
+}
+
+// The landing of a room made from the pane (order PF2): its name, what the call said of the door, and OK. None when no room was made in this session or OK was pressed.
+export type Landing = { name: string; door: 'up' | 'none'; onOk: () => void }
 
 // The same for the door of a room that stands (order MR, R3): whether the call runs, the one line the last call left (whole), whether that
 // line is the pane's own, whether the Button `Start the door` stands, and its press. None while the door goes well and quietly.
@@ -210,6 +233,7 @@ export type PaneProps = {
   exists: boolean
   noRoomText: string
   maker?: Maker
+  landing?: Landing
   starter?: Starter
   // Your cards (order YC, Y2b): the session ids of this folder from room-pane-sessions.json (newest first), the ids of the cards a say of the
   // pane made in this session, and whether the plugin option turned the bridge off (the line of where to write says so).

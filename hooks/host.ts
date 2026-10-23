@@ -34,7 +34,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.83'
+export const VERSION = '0.8.84'
 // The channel the pane runs in: `prod` in the released pane; .kairos/devpane/refresh.sh makes it `dev` in the dev copy. The status line says it.
 export const CHANNEL = 'prod'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
@@ -68,7 +68,7 @@ export const localStartArgv = (roomSh: string): string[] => ['sh', roomSh, 'star
 export const sessionIdOf = (given: unknown): string => (typeof given === 'string' && isSessionId(given) ? given : '')
 
 // A room found by its mark says and taps through sandoq; a room found by room.sh says and taps through its room.sh as
-// before. The pane never runs `sandoq room new`. A tap runs in the room's folder. A say runs in the SESSION's folder, for
+// before. The pane runs `sandoq room new` only for the room flow (roomNewArgv, its last press). A tap runs in the room's folder. A say runs in the SESSION's folder, for
 // sandoq reads the seat from the folder it runs in (the longest line of seats.md), so the pane holds no seat word: the text is
 // one word of the argv, and the flag --session and the id stand before it only when the id is of the room's shape. This is the
 // session's voice (the tool and the command); the bar's say of a marked room makes his card by barCardArgv.
@@ -303,7 +303,7 @@ export const roomNewArgv = (host: Host, name: string): string[] =>
 export const roomStartArgv = (host: Host): string[] => inRunArgv(host, [host.sandoq ?? '', 'room', 'start', '--unit', '--json'])
 
 // A room can start a door only when its run folder holds the door's program: room.sh start makes the run
-// folder when door.py is not there, and the pane never makes a room.
+// folder when door.py is not there, and the pane makes a room only by the room flow's press (roomNewArgv).
 export const DOOR_PY = 'unpacked/room-seat/door.py'
 export const doorPyPath = (root: string): string => `${root.replace(/\/+$/, '')}/${DOOR_PY}`
 

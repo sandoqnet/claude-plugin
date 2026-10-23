@@ -1,4 +1,4 @@
-# room-pane 0.8.83
+# room-pane 0.8.84
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -28,9 +28,10 @@ marked room, `python3 feedin.py` for a room found by `room.sh`) in the room's wo
 flags `--kind his`, `--folder` and `--session`, the prompt on the input. The bar's "To the room"
 still runs the verb `sandoq room card` with the flag `--no-seat`. A tap goes through `sandoq room
 tap`, the room's other programs run by `sandoq room run` with the bare name, and the door starts
-with `sandoq room start`. The pane runs `sandoq room new` only when you press Make a room here (see
-below). It finds `sandoq` on the PATH, under the sandoq home, or by the plugin option `sandoq`.
-LOAD.md has the steps. A room found by `room.sh` works as before.
+with `sandoq room start`. The pane runs `sandoq room new` only when you press Make the room, the
+last step of the room flow that Make a room here opens (see below). It finds `sandoq` on the PATH,
+under the sandoq home, or by the plugin option `sandoq`. LOAD.md has the steps. A room found by
+`room.sh` works as before.
 
 `feedin` prints the card's word, a dot and the id, when the room's door made a card of the entry:
 the hook then waits for the card's reading as ever. With no word and exit 0 the door made no card
@@ -344,7 +345,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.83 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.84 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -706,9 +707,23 @@ for a room when it is no full path, the root, the home itself, a folder with few
 under the home, a temp folder or any folder in one, or a folder under the home whose first part
 is Library, AppData or begins with a dot.
 
-A press runs `sandoq room new NAME --json` in the session's folder, the name always first, and
-never with an empty name. The Button goes while it runs, and the pane says "Making the room…".
-`made` shows no line: the next poll finds the room and draws it. `refused`, or exit 1, shows
+Make a room here opens the room flow. Nothing runs in its first two steps. **Name:** an Input with
+the folder's name offered, Next and Cancel. One rule for a name, the one `sandoq room new` takes:
+letters, digits, `-` and `_`, never a `-` first, one word. The hint says it, and a name that does
+not fit shows the line and goes no further. **Confirm:** "Make NAME?", what the one call does
+(writes the mark `.sandoq/room.md`, adds the room to this machine's list of rooms, starts the door
+if the machine can, opens the pane in the room), Back and Make the room. The typed name is kept
+over Back, Cancel and a refusal.
+
+The press of Make the room runs `sandoq room new NAME --json` in the session's folder, the name
+always first, and never with an empty name. The Button goes while it runs, and the pane says
+"Making the room…" with its steps. The call is one process run, read when it ends, so while it
+runs only `sandoq room new runs` stands (●) and the steps after it are not shown done (○). When it
+ended well the mark is written (✓), and the door starts (✓) only where its last object says
+`started` or `door-stands`. The read after the call finds the room and the pane lands in it: a band,
+`NAME is born`, what the call said of the door, `Put a disc on ›` and OK. OK clears it, and a
+session start forgets it. The band stands in any place but the two of the update band.
+`made` shows no other line: the next poll finds the room and draws it. `refused`, or exit 1, shows
 sandoq's line and the Button again; where the name is held for another folder, make the room with
 a name of your own in a terminal. Exit 2 with no object is an older sandoq: the pane says "This
 sandoq is too old to make a room from the pane. Run sandoq room new in this folder." and shows no

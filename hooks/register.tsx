@@ -137,6 +137,8 @@ import { freshFeed, parseFeed, shapeAsks, whereWords } from './model/roomfeed'
 import type { FeedEntry } from './model/roomfeed'
 import { discsOf, doorOf, programsOf, sizeOf, updateOf } from './model/roomplace'
 import { DOOR_NOT_READ, DOOR_REFUSED, DOOR_UNKNOWN, ROOM_NOT_READ, ROOM_REFUSED, ROOM_TOO_OLD, ROOM_UNKNOWN, roomNameOf, roomStartOf, whereOf } from './model/roomstart'
+import { nameFault } from './model/roomflow'
+import type { Born } from './model/roomflow'
 import { seatFace, waitKey, waitsOnHim } from './model/seat'
 import {
   NEEDS_SEAT,
@@ -206,7 +208,7 @@ import { LETTER_TEXT } from './views/seat'
 import { WALK_LIST, WALK_OPEN } from './views/walk'
 import { tilesOn } from './views/tiles'
 import { layout } from './views/space'
-import type { Actions, Card, DiscChecks, Face, Maker, Nav, Starter, UrWindow, WalkText } from './views/types'
+import type { Actions, Card, DiscChecks, Face, Landing, Maker, Nav, Starter, UrWindow, WalkText } from './views/types'
 import type { CheckResult, UpdateResult, VersionsCard } from './views/versions'
 import type { BandActs } from './views/updateband'
 
@@ -864,49 +866,84 @@ async function updatePane($): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
-// The Button that makes a room where none stands (order MR, R2): "Make a room here" runs `sandoq room new NAME --json` in the session's
+// The room made from the pane (orders MR, R2 and PF2): "Make a room here" opens a name step (the folder's name offered, the one rule `sandoq room new`
+// takes), then a confirm step (what the call writes and starts), and its press "Make the room" runs `sandoq room new NAME --json` in the session's
 // folder, by process run alone (it is short) and with NO second try: a run the app cut, or past the pane's limit, may have made the room,
 // so the pane says it knows nothing of it and asks the person to look in the folder. The pane reads no version of sandoq to decide: the
 // call is the sign, an older sandoq answers with usage (exit 2) and does nothing, and then no Button stands for the rest of the session.
-// `rest` has the Button, `making` is the call out, `refused` has sandoq's line and the Button again, `unknown` has the line of what is
-// not known and no Button until a poll that began after the call finds no room again. In memory only; a session start forgets it.
-// `own` says the line is the pane's own, not sandoq's: the draw gives it more rows and does not cut it at three.
-type Make = { stage: 'rest' | 'making' | 'refused' | 'unknown'; line: string; own: boolean; after: number }
-const NO_MAKE: Make = { stage: 'rest', line: '', own: true, after: 0 }
+// `rest` has the Button, `name` and `confirm` are the two steps before the call (nothing runs in them), `making` is the call out, `refused` has
+// sandoq's line and the Button again, `unknown` has the line of what is not known and no Button until a poll that began after the call finds no
+// room again. In memory only; a session start forgets it. `own` says the line is the pane's own, not sandoq's: the draw gives it more rows and
+// does not cut it at three. `name` is the name typed so far (kept over a refusal), `ended` and `door` are what the ended call said: only then
+// is a step of the making drawn done.
+type Make = { stage: 'rest' | 'name' | 'confirm' | 'making' | 'refused' | 'unknown'; line: string; own: boolean; after: number; name: string; fault: string; ended: boolean; door: 'up' | 'none' | 'unknown' }
+const NO_MAKE: Make = { stage: 'rest', line: '', own: true, after: 0, name: '', fault: '', ended: false, door: 'unknown' }
 let make: Make = NO_MAKE
 let makeRun = 0
 let makerOld = false
+// What the call that made the room said, kept for the landing until OK (a session start forgets it).
+let born: Born | undefined
 // The number of the last read of the room that began: a read that began after a call ended is one that saw what the call left.
 let readNo = 0
 
 const makeLine = (): string => (makerOld ? ROOM_TOO_OLD : make.line)
+const mayMake = (): boolean => !makerOld && host.mode === 'none' && host.maker !== undefined && host.maker !== ''
 
 async function makeRoom($): Promise<void> {
-  if (make.stage === 'making' || makerOld || host.mode !== 'none' || host.maker === undefined || host.maker === '') return
+  if (make.stage !== 'confirm' || !mayMake()) return
+  const name = make.name
   const run = (makeRun += 1)
-  const argv = roomNewArgv(host, host.session)
-  make = { stage: 'making', line: '', own: true, after: readNo }
+  const argv = roomNewArgv(host, name)
+  make = { ...NO_MAKE, stage: 'making', name, after: readNo }
   $.ui.invalidate('ui.render')
-  let next: Make = { stage: 'unknown', line: ROOM_NOT_READ, own: true, after: 0 }
+  let next: Make = { ...NO_MAKE, stage: 'unknown', line: ROOM_NOT_READ, name, after: 0 }
   let isOld = false
+  let said: Born | undefined
   try {
     const call = await runWithin($, argv, LIMIT.send, 'sandoq room new')
     const read = roomStartOf(call.stdout ?? '', call.exitCode)
-    if (read.read && read.ok) next = NO_MAKE
-    else if (read.read) next = { stage: 'refused', line: read.line === '' ? ROOM_REFUSED : read.line, own: read.line === '', after: 0 }
+    if (read.read && read.ok) {
+      next = NO_MAKE
+      said = { name, door: read.state === 'started' || read.state === 'door-stands' ? 'up' : 'none' }
+    } else if (read.read) next = { ...NO_MAKE, stage: 'refused', line: read.line === '' ? ROOM_REFUSED : read.line, own: read.line === '', name }
     else if (read.reason === 'usage') isOld = true
   } catch (error) {
-    next = { stage: 'unknown', line: `${isUnanswered(error) ? error.message : `sandoq room new did not run: ${scrub(String(error)).slice(0, 100)}`}. ${ROOM_UNKNOWN}`, own: true, after: 0 }
+    next = { ...NO_MAKE, stage: 'unknown', line: `${isUnanswered(error) ? error.message : `sandoq room new did not run: ${scrub(String(error)).slice(0, 100)}`}. ${ROOM_UNKNOWN}`, name }
   }
   if (run !== makeRun) return
   if (isOld) {
     makerOld = true
     next = NO_MAKE
   }
-  make = next.stage === 'unknown' ? { ...next, after: readNo } : next
+  // The call ended well: the pane knows the mark is written and what the door did; it does not yet know the pane is in the room.
+  if (said !== undefined) make = { ...NO_MAKE, stage: 'making', name, ended: true, door: said.door, after: readNo }
+  else make = next.stage === 'unknown' ? { ...next, after: readNo } : next
   $.ui.invalidate('ui.render')
-  // A room made is found by the next poll: it is asked now.
-  if (next === NO_MAKE && !isOld) await poll($)
+  // A room made is found by the next poll: it is asked now. The landing stands only when that read finds the room.
+  if (said !== undefined) {
+    await poll($)
+    if (run !== makeRun) return
+    if (host.mode !== 'none') born = said
+    make = NO_MAKE
+    $.ui.invalidate('ui.render')
+  }
+}
+
+// The steps of the room flow: each moves the one state, and the name's checks are the rule alone.
+function makeStep(step: 'open' | 'cancel' | 'back' | 'draft' | 'next', $, text = ''): void {
+  if (!mayMake() || make.stage === 'making') return
+  if (step === 'open' && (make.stage === 'rest' || make.stage === 'refused')) make = { ...NO_MAKE, stage: 'name', name: make.name }
+  else if (step === 'cancel' && (make.stage === 'name' || make.stage === 'confirm')) make = { ...NO_MAKE, name: make.name }
+  else if (step === 'back' && make.stage === 'confirm') make = { ...make, stage: 'name' }
+  else if (step === 'draft' && make.stage === 'name') {
+    make = { ...make, name: text }
+    return
+  } else if (step === 'next' && make.stage === 'name') {
+    const typed = text.trim()
+    const fault = nameFault(typed)
+    make = fault === '' ? { ...NO_MAKE, stage: 'confirm', name: typed } : { ...make, name: text, fault }
+  } else return
+  $.ui.invalidate('ui.render')
 }
 
 // The Button as the views draw it: only where no room is found and a room may be made here; None otherwise.
@@ -920,8 +957,31 @@ const makerNow = ($): Maker | undefined =>
         line: makeLine(),
         own: makerOld || make.own,
         button: !makerOld && (make.stage === 'rest' || make.stage === 'refused'),
-        onMake: () => {
+        onMake: () => makeStep('open', $),
+        step: make.stage === 'name' || make.stage === 'confirm' || make.stage === 'making' ? make.stage : 'rest',
+        typed: make.name,
+        fault: make.fault,
+        ended: make.ended,
+        door: make.door,
+        onDraft: (text: string) => makeStep('draft', $, text),
+        onNext: (text: string) => makeStep('next', $, text),
+        onBack: () => makeStep('back', $),
+        onCancel: () => makeStep('cancel', $),
+        onGo: () => {
           void makeRoom($)
+        },
+      }
+
+// The landing of a room made from the pane (order PF2): once, until OK, over the places of the room the pane opened in. The view draws the press that opens the plays of the
+// room (the one the Versions card has); the room app has no press for a room's own page, so none is drawn for it.
+const landingNow = ($): Landing | undefined =>
+  born === undefined
+    ? undefined
+    : {
+        ...born,
+        onOk: () => {
+          born = undefined
+          $.ui.invalidate('ui.render')
         },
       }
 
@@ -3178,7 +3238,7 @@ async function doTap($, choice: string, cardArg: string, askArg = ''): Promise<s
 async function doNew($): Promise<string> {
   host = await detectMode(ioOf($))
   if (host.mode === 'none') return `room: ${NO_ROOM}`
-  // The pane never runs `sandoq room new`: a room found by its mark is made already.
+  // The pane runs `sandoq room new` only for the room flow (makeRoom): a room found by its mark is made already.
   if (host.marked) return 'room: this folder has a room already (its mark is .sandoq/room.md)'
   if (!isLocal()) return 'room: /room-new is local only; this room has no room.sh'
   const made = await runPost($, localNewArgv(host.roomSh), true, 'room.sh new')
@@ -4312,6 +4372,7 @@ const paneOf = ($, e) => {
     exists: snap.exists,
     noRoomText: lateLine() !== '' ? lateLine() : !isRead ? READING_LINE : host.mode === 'none' ? NO_ROOM : 'No room folder yet.',
     maker: isRead ? makerNow($) : undefined,
+    landing: isRead ? landingNow($) : undefined,
     starter: isRead ? starterNow($) : undefined,
     yours: yourCards,
     yourIds,
@@ -4503,6 +4564,7 @@ export const register: Register = on => {
     // The call that makes a room and the call that starts a door (order MR): one out at the old session is dropped, and what it left with it.
     // The door's state and the door found are forgotten above.
     make = NO_MAKE
+    born = undefined
     makeRun += 1
     makerOld = false
     start = NO_START

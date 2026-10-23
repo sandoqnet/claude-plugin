@@ -56,6 +56,7 @@ import { seatWindowView, seatsView } from './seats'
 import { nudgeShown } from '../model/nudge'
 import { keysView, nudgeView, secretsView, settingsParts } from './settings'
 import { settingsListView } from './settingslist'
+import { landingView, makerFlowView } from './makerflow'
 import { bandView, skippedView } from './updateband'
 import { busyOf, versionsView } from './versions'
 import { FULL_FLOOR, wordRows, wrapRows } from './versions-table'
@@ -243,6 +244,8 @@ const askView = (state: RoomState, key: string, ask: Ask, text: { label: string;
 const makerView = (state: RoomState) => {
   const { maker } = state
   if (maker === undefined) return []
+  // The name, the confirm and the making steps (order PF2) stand in the place of the Button; the Button, and the line a refusal left, stand at rest.
+  if (maker.step !== 'rest') return makerFlowView({ ui: state.ui, surface: surfaceOf(state), maker, width: state.app ? state.plan.width : state.columns, columns: state.columns })
   return askView(state, 'make-room', { ...maker, press: maker.onMake }, { label: MAKE_BUTTON, making: MAKING, dim: makeWords(maker.name, maker.where) })
 }
 
@@ -272,6 +275,8 @@ const noRoomView = (state: RoomState) => {
   const { ui, exists, noRoomText, app } = state
   const { Box, Text } = ui
   if (exists) return []
+  // A step of the room flow (order PF2) is the card of the place: the line of no room stands again where the Button does (the bar says no room meanwhile).
+  if (state.maker !== undefined && state.maker.step !== 'rest') return makerView(state)
   if (!app) return [<Text key="no-room" color={LOOK.quiet}>{noRoomText}</Text>, ...makerView(state)]
   return [
     <Box key="no-room" alignSelf="flex-start" paddingX={SPACE.control} backgroundColor={THEME.ground}>
@@ -598,6 +603,12 @@ const bandHere = (nav: Nav): boolean => nav.view !== 'room' && !(nav.view === 's
 // The rows the band takes are counted in the canvas a place pages to (canvasLeftOf), so no page of any place passes the canvas with it (tests/update-height.test.ts sweeps each page of
 // each place). The band holds the last three steps of a run, each cut to one row, and sandoq's own line cut to three, so it is never taller than a few rows.
 const bandOf = (state: RoomState, width: number) => {
+  // The landing of a room made from the pane (order PF2) stands first, once, until OK; the update band comes after it.
+  const landed = state.landing
+  if (landed !== undefined && bandHere(state.nav)) {
+    const open = state.actions.open
+    return landingView({ ui: state.ui, surface: surfaceOf(state), landing: landed, inner: Math.max(1, width - 2 - 2 * SPACE.control), onDisc: () => void open({ view: 'room', card: 'plays' }) })
+  }
   const band = state.flow?.band
   const acts = state.flowActs
   if (band === undefined || acts === undefined || !bandHere(state.nav)) return undefined

@@ -1,4 +1,4 @@
-# room-pane 0.8.80
+# room-pane 0.8.81
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -344,7 +344,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.80 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.81 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -1256,6 +1256,25 @@ door runs, and nothing else.
   the newest card of the room. It says first what waits on you, counted as "Desk N" counts it
   ("nothing waits on you", "N waits on you"); it said the records of the shelf, which are no part
   of the desk (`room · 0 records` over a desk of three).
+- The seat part of the band. From sandoq 0.4.45, a folder whose room and seat the pane knows (the
+  room by its mark, the seat by seats.md) has the band say `SEAT · seat open · 2 rows wait · 1
+  waits on you`: `seat open` or `seat shut`, then `N rows wait`, `1 row waits`, `no rows wait`
+  (`N+ rows wait` when more wait than the peek counts, and no rows part when the peek could not
+  count), then what waits on you. It stands in place of the newest card's preview. The late, need,
+  door and waiting-card lines stand before it (a card that waits for a tap names the ask he must
+  tap, in its words), so the seat part shows when no card waits for a tap. A folder with no mark,
+  as a lab seat's worktree has, knows no room: there the pane finds the sandoq for the session's
+  folder, and when it is 0.4.45 or later runs `sandoq room peek --json` with no flags, which reads
+  seated.json for the folder; the room and the seat are taken from the answer, and an answer of
+  `open` false that names no seat leaves the band as it was (no waits part stands, the pane has
+  read no desk there). Under 0.4.45, with no sandoq, no seat known, or a peek that does not answer
+  in json, the band is as it was. The pane reads `sandoq room peek --json --room ROOM --seat SEAT`
+  (it writes nothing and moves no cursor) on events alone: the session start, a prompt, a turn's
+  end, `/sandoq open` and `/sandoq shut` (and the same words after `/room`), and the wake's
+  hand-over of rows. The poll of two seconds never reads it and a draw reads nothing; an event
+  while a read runs asks one more read after it. `/sandoq:seat-open` and `/sandoq:seat-shut` run
+  the plugin's seatwake.ts and give the host no command event: the next prompt or turn's end reads
+  the seat then.
 
 Left out: the fonts of the mockups (a terminal draws the one monospace font you chose; the plugin
 cannot set it), the round avatar of a person (the kit draws no circle and a terminal cell is

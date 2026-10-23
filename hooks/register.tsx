@@ -56,6 +56,9 @@ import {
   roomNewArgv,
   roomStartArgv,
   folderSeatShowArgv,
+  PEEK_FROM,
+  peekArgv,
+  peekFolderArgv,
   sandoqFault,
   sandoqIn,
   seatRowsArgv,
@@ -176,6 +179,8 @@ import type { SeatShelf } from './model/shelfreads'
 import { groundsOf, hourFor, paneRows } from './model/scene'
 import { afterLine, checkedSteps, doorNotUp, doorOfCheck, isNoClaude, isPaneRestart, paneStepOf, readSteps, stepLines, waits, withoutProgress, wordOf as stateWord } from './model/steps'
 import type { Door, Step } from './model/steps'
+import { peekNamed, peekOf, seatBandLine } from './model/seatband'
+import type { Peek } from './model/seatband'
 import { DEFAULT_FACE, FACES, INDENT, openAsks, parseWalk, waitingLine } from './model/walk'
 import { DOOR_LATE, NO_CARD_LINE, candidatesOf, cardAtPlace, idOfSay, keepSaid, lineOf, newestIdOf, sessionIdsOf, withoutSlashWords, writeLineOf, yourCardsOf } from './model/yourcards'
 import { failureLine, guardedPane, plainBlock } from './views/guard'
@@ -2774,6 +2779,8 @@ async function wakeLoop($, seat: SeatOpen): Promise<void> {
     seat.held = [...seat.held, ...rows]
     // The wake hands what it read at once: the session is idle, or the kit refuses and the card says the rows wait for the turn's end.
     await submitHeld($, seat)
+    // The hand-over of rows moves what waits: the band's seat part is read again.
+    void askPeek($)
     // The bad line is still said once when the submit was taken (a taken submit clears the card's note).
     if (bad > 0 && seat.note === '' && !seat.shutting) {
       seat.note = badRowLine(bad)
@@ -2802,6 +2809,93 @@ async function seatKeeper($, run: number): Promise<void> {
 function endWake($, seat: SeatOpen, why: string): void {
   seat.note = wakeEndedLine(why)
   $.ui.invalidate('ui.render')
+}
+
+// THE SEAT PART OF THE BAND (order seat band): `sandoq room peek --json --room ROOM --seat SEAT` (from PEEK_FROM) says whether the folder's seat is open and how many rows wait for
+// it, and the band draws that answer from memory: the band and a draw read nothing. The peek is asked on EVENTS alone (the session start after its first read, prompt.submit,
+// turn.complete, the /sandoq and /room words open and shut, and the wake's hand-over of rows) and NEVER by the POLL_MS tick or a draw. One read runs at a time: an event while it
+// runs asks one more read after it, never two. The commands seat-open and seat-shut of the plugin run seatwake.ts and give the kit no command.run: the turn they end is the event.
+// A sandoq under PEEK_FROM, no sandoq, no room or seat known, or a peek that does not answer in json leaves no answer, and the band is as it was.
+// `by` says how it was asked: with the flags of a room and a seat the pane knows (a marked room), or with none from a folder that holds no mark (a lab seat's worktree), where the answer names them.
+type Seen = Peek & { room: string; seat: string; by: 'flags' | 'folder' }
+let peek: Seen | undefined
+// The version said by the sandoq found for a folder with no mark, kept by its path, for the gate on PEEK_FROM of the peek with no flags.
+let peekSaid: { sandoq: string; said: string } | undefined
+let peeking = false
+let peekAgain = false
+let peekRun = 0
+
+// The room and the seat the pane knows for its folder: the room by its mark, the seat by seats.md ('' when it is not known).
+const peekWho = (): { room: string; seat: string } => ({ room: host.marked && (host.name ?? '') !== '' ? (host.name as string) : '', seat: seatNow() })
+
+// A room and a seat the pane knows read the peek with the flags (the sandoq of the marked room, its version from the room app's read). A folder that holds no mark knows
+// no room: its sandoq is the one found for the session's folder, gated on PEEK_FROM by its own version, and the peek runs with NO flags; sandoq reads seated.json for the folder
+// and the answer names the room and the seat. An answer of `open` false names none, and the band has no seat part. A marked room's own folder (no seat in seats.md), a room of room.sh and a room of the world ask nothing: only a folder with no room at all (mode none) is looked at.
+async function peekOnce($, run: number): Promise<void> {
+  const { room, seat } = peekWho()
+  let got: Seen | undefined
+  if (SEAT_WORD.test(room) && SEAT_WORD.test(seat)) {
+    const sandoq = host.sandoq ?? ''
+    if (sandoq !== '') {
+      await readRoomApp($)
+      if (run === peekRun && roomApp !== undefined && roomApp.sandoq === sandoq && roomAppHas(roomApp.said, PEEK_FROM)) {
+        try {
+          const ran = await runWithin($, peekArgv(sandoq, room, seat), LIMIT.open, 'the peek of the seat')
+          const said = ran.exitCode === 0 ? peekOf(String(ran.stdout ?? '')) : undefined
+          if (said !== undefined) got = { ...said, room, seat, by: 'flags' }
+        } catch {
+          // no answer in time, or a process that did not run: no seat part
+        }
+      }
+    }
+  } else if (host.session !== '' && host.mode === 'none') {
+    const sandoq = await sandoqIn(ioOf($), host.session)
+    if (sandoq !== '') {
+      if (peekSaid?.sandoq !== sandoq) {
+        const said = await sandoqSaid($, sandoq)
+        if (/\d+\.\d+\.\d+/.test(said)) peekSaid = { sandoq, said }
+      }
+      if (run === peekRun && peekSaid?.sandoq === sandoq && roomAppHas(peekSaid.said, PEEK_FROM)) {
+        try {
+          const ran = await runWithin($, peekFolderArgv(sandoq), LIMIT.open, 'the peek of the folder')
+          const out = ran.exitCode === 0 ? String(ran.stdout ?? '') : ''
+          const said = peekOf(out)
+          const named = peekNamed(out)
+          if (said !== undefined && named !== undefined && SEAT_WORD.test(named.room) && SEAT_WORD.test(named.seat)) got = { ...said, ...named, by: 'folder' }
+        } catch {
+          // no answer in time, or a process that did not run: no seat part
+        }
+      }
+    }
+  }
+  if (run !== peekRun) return
+  peek = got
+  $.ui.invalidate('ui.render')
+}
+
+async function askPeek($): Promise<void> {
+  if (peeking) {
+    peekAgain = true
+    return
+  }
+  peeking = true
+  const run = peekRun
+  try {
+    do {
+      peekAgain = false
+      await peekOnce($, run)
+    } while (peekAgain && run === peekRun)
+  } finally {
+    if (run === peekRun) peeking = false
+  }
+}
+
+// The words /sandoq and /room of the pane: an open or a shut moves the seat, so the peek is read once the words are done.
+async function sandoqWords($, args: unknown): Promise<{ text: string }> {
+  const text = await openOrSay($, args)
+  const word = seatWordsOf(withoutSlashWords(String(args ?? '').trim()))?.word
+  if (word === 'open' || word === 'shut') await askPeek($)
+  return { text }
 }
 
 async function doOpenSeat($, room: string, seat: string): Promise<string> {
@@ -3257,26 +3351,48 @@ function labelOf(card: Card): string {
   return card.walk.act
 }
 
+// What waits on HIM, counted as Desk N counts it (views/pane.tsx deskCountOf).
+const waitsNow = (): string =>
+  waitsOnYouWords(deskCountOf({ walks: snap.walks, seatsText: snap.seatsText, seat: seatNow(), now: pollNow, zone: zoneOf(), entries: snap.entries, deskCard: deskCardNow(), keeperOk: [...keeperOk], feed: snap.feed }))
+
+// The seat part of the band (order seat band), or '' when it does not stand: the room is not read, or the peek has no answer for this folder. A peek asked with the flags stands for the
+// room and seat the pane knows now; one asked with none stands while the pane knows no room or seat (the answer named them). A seat the pane opened itself is open here whatever the
+// folder's own entry says of it (the pane keeps that seat in memory, not in seated.json). A folder with no room read has no desk to count: no waits part.
+function seatPartLine(): string {
+  if (peek === undefined) return ''
+  const mine = peekWho()
+  const known = SEAT_WORD.test(mine.room) && SEAT_WORD.test(mine.seat)
+  if (known ? peek.by !== 'flags' || peek.room !== mine.room || peek.seat !== mine.seat : peek.by !== 'folder') return ''
+  if (known && !snap.exists) return ''
+  const open = peek.open || (seatOpen !== undefined && seatOpen.room === peek.room && seatOpen.seat === peek.seat)
+  return seatBandLine(peek.seat, open, peek, snap.exists ? waitsNow() : '')
+}
+
 // The band's one line, or '' when there is nothing to say.
 function bandText(): string {
   // The room is not read yet, or a thing did not answer: the one plain line says which, and the rest waits for the read.
   if (!isRead) return `room · ${lateLine() === '' ? READING : lateLine()}`
   if (lateLine() !== '') return `room · ${lateLine()}`
-  if (host.mode === 'none') return `room · ${NO_ROOM}`
+  // A folder with no mark and no room (a lab seat's worktree) has no card, wait or need to say: when its seat is read, the seat part stands, else the plain line.
+  if (host.mode === 'none') return seatPartLine() || `room · ${NO_ROOM}`
   if (isLocal() && doorState === 'starting') return 'room · door starting'
   if (isLocal() && doorState === 'stopped') return 'room · door stopped'
   if (isLocal() && doorState === 'none') return 'room · no door in this room'
-  // The need line says nothing a wait or a door state says: it stands after them, before the empty room and the newest card.
+  // The late, door, waiting-card and need lines stand before the seat part (a card that waits for a tap names the ask he must tap, in its words); the seat part takes the place of
+  // the newest card's preview and stands when no card waits.
   const waiting = snap.exists ? snap.cards.find(waitsHere) : undefined
   if (waiting) return waitingLine(snap.cards.filter(waitsHere).flatMap(card => openAsks(card.raw)))
+  // The need line says nothing a wait or a door state says: it stands after them, before the seat part, the empty room and the newest card.
   if (needLine() !== '') return `room · ${needLine()}`
+  const seatPart = seatPartLine()
+  if (seatPart !== '') return seatPart
   if (!snap.exists) return ''
   // A card the session bridged (its root names a session) is the session's own say: the band shows the
   // newest card of the room.
   const newest = snap.cards.find(card => card.walk.session === '')
   // What waits on HIM, counted as Desk N counts it (views/pane.tsx deskCountOf). The band said the shelf's records here, `room · 0 records`, which
   // is a count of the catalog and no part of the desk: it read 0 over a desk of 3 (the lab's real capture of 0.8.65, order mend terminal real).
-  const waits = waitsOnYouWords(deskCountOf({ walks: snap.walks, seatsText: snap.seatsText, seat: seatNow(), now: pollNow, zone: zoneOf(), entries: snap.entries, deskCard: deskCardNow(), keeperOk: [...keeperOk], feed: snap.feed }))
+  const waits = waitsNow()
   if (!newest) return `room · ${waits}`
   const label = labelOf(newest)
   const status = statusOf(newest, newest.walk.answered)
@@ -4300,7 +4416,14 @@ export const register: Register = on => {
     pollStop = $.clock.every(POLL_MS, () => {
       if (mine === pollGen) void poll($)
     })
+    // The seat part of the band: the answer of an earlier start is not this one's; the peek is read after the first read of the room has found the room and the seat.
+    peek = undefined
+    peekSaid = undefined
+    peeking = false
+    peekAgain = false
+    peekRun += 1
     await waitUpTo($, LIMIT.start, firstRead($, first))
+    void askPeek($)
 
     return next(e)
   })
@@ -4318,6 +4441,7 @@ export const register: Register = on => {
 
   // A /sandoq part in the middle of his message goes to the room as a say, and the turn reads the words before it alone (hooks/midsay.ts).
   on('prompt.submit', async ($, e, next) => {
+    void askPeek($)
     const edit = await midEdit(e, part => sendMid($, part))
     return next(edit === undefined ? e : { ...e, ...edit })
   })
@@ -4328,6 +4452,7 @@ export const register: Register = on => {
     if (seatOpen !== undefined) await submitHeld($, seatOpen)
     // The turn of a seat ends when a wake has been answered: the Nudge state is read again (a fire is a wake).
     void readNudge($)
+    void askPeek($)
 
     return next(e)
   })
@@ -4377,9 +4502,9 @@ export const register: Register = on => {
 
   on('command.run', { command: 'room-nudge' }, async $ => ({ text: await doNudge($) }))
 
-  on('command.run', { command: 'sandoq' }, async ($, e) => ({ text: await openOrSay($, e.args) }))
+  on('command.run', { command: 'sandoq' }, async ($, e) => sandoqWords($, e.args))
 
-  on('command.run', { command: 'room' }, async ($, e) => ({ text: await openOrSay($, e.args) }))
+  on('command.run', { command: 'room' }, async ($, e) => sandoqWords($, e.args))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const line = bandText()

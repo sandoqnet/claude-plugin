@@ -34,7 +34,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.80'
+export const VERSION = '0.8.81'
 // The channel the pane runs in: `prod` in the released pane; .kairos/devpane/refresh.sh makes it `dev` in the dev copy. The status line says it.
 export const CHANNEL = 'prod'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
@@ -224,6 +224,12 @@ export const hearFromOf = (word: string | undefined): string | undefined => (wor
 // What of sandoq's out goes back: the whole out of a run that ended with code 0, else nothing. The hook's own exit is 0 whatever sandoq did, since an exit 2 on
 // UserPromptSubmit blocks his prompt; an out that is not one json line of a fault would be read as context, so it never goes back from a run that did not end well.
 export const hearOutOf = (code: number | null, out: string): string => (code === 0 ? out : '')
+// THE SEAT PART OF THE BAND: `room peek --json --room ROOM --seat SEAT` (from PEEK_FROM) says one json line of the seat, exit 0 always, and writes nothing nor moves a
+// cursor. It runs from the session's folder, whose entry in seated.json says whether the seat is open; a sandoq under PEEK_FROM has no peek (usage, exit 2).
+export const PEEK_FROM = '0.4.45'
+export const peekArgv = (sandoq: string, room: string, seat: string): string[] => [sandoq, ROOM_NOUN, 'peek', JSON_WORD, '--room', room, '--seat', seat]
+// A folder with no mark (a lab seat's worktree) knows no room: the peek with no flags reads the folder's own entry in seated.json and names the room and the seat in its answer.
+export const peekFolderArgv = (sandoq: string): string[] => [sandoq, ROOM_NOUN, 'peek', JSON_WORD]
 const SEAT_SESSION_FLAG = '--session'
 // The wake: `room wake ROOM --next --seat SEAT --json` passes until a pass holds a row of SEAT, prints that pass's rows of SEAT, one json object a line
 // ({r, seat, seq, line}), and exits 0. It is the pane's own process (spawned, never a Bash call of Claude) and has no limit: it ends with rows, or when

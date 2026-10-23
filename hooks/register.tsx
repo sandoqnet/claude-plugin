@@ -3356,13 +3356,13 @@ const waitsNow = (): string =>
   waitsOnYouWords(deskCountOf({ walks: snap.walks, seatsText: snap.seatsText, seat: seatNow(), now: pollNow, zone: zoneOf(), entries: snap.entries, deskCard: deskCardNow(), keeperOk: [...keeperOk], feed: snap.feed }))
 
 // The seat part of the band (order seat band), or '' when it does not stand: the room is not read, or the peek has no answer for this folder. A peek asked with the flags stands for the
-// room and seat the pane knows now; one asked with none stands while the pane knows no room or seat (the answer named them). A seat the pane opened itself is open here whatever the
+// room and seat the pane knows now; one asked with none stands while the pane knows no room or seat and the folder has no room (the answer named them; a room made there since ends it). A seat the pane opened itself is open here whatever the
 // folder's own entry says of it (the pane keeps that seat in memory, not in seated.json). A folder with no room read has no desk to count: no waits part.
 function seatPartLine(): string {
   if (peek === undefined) return ''
   const mine = peekWho()
   const known = SEAT_WORD.test(mine.room) && SEAT_WORD.test(mine.seat)
-  if (known ? peek.by !== 'flags' || peek.room !== mine.room || peek.seat !== mine.seat : peek.by !== 'folder') return ''
+  if (known ? peek.by !== 'flags' || peek.room !== mine.room || peek.seat !== mine.seat : peek.by !== 'folder' || host.mode !== 'none') return ''
   if (known && !snap.exists) return ''
   const open = peek.open || (seatOpen !== undefined && seatOpen.room === peek.room && seatOpen.seat === peek.seat)
   return seatBandLine(peek.seat, open, peek, snap.exists ? waitsNow() : '')

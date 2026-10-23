@@ -1,4 +1,4 @@
-# room-pane 0.8.81
+# room-pane 0.8.82
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -344,7 +344,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.81 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.82 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -1267,14 +1267,16 @@ door runs, and nothing else.
   folder, and when it is 0.4.45 or later runs `sandoq room peek --json` with no flags, which reads
   seated.json for the folder; the room and the seat are taken from the answer, and an answer of
   `open` false that names no seat leaves the band as it was (no waits part stands, the pane has
-  read no desk there). Under 0.4.45, with no sandoq, no seat known, or a peek that does not answer
-  in json, the band is as it was. The pane reads `sandoq room peek --json --room ROOM --seat SEAT`
-  (it writes nothing and moves no cursor) on events alone: the session start, a prompt, a turn's
-  end, `/sandoq open` and `/sandoq shut` (and the same words after `/room`), and the wake's
-  hand-over of rows. The poll of two seconds never reads it and a draw reads nothing; an event
-  while a read runs asks one more read after it. `/sandoq:seat-open` and `/sandoq:seat-shut` run
-  the plugin's seatwake.ts and give the host no command event: the next prompt or turn's end reads
-  the seat then.
+  read no desk there). A peek kept for a seat stands for that room and seat alone: when the pane
+  comes to know another seat, or a room is made in a folder that had none, the kept peek shows no
+  more, and the next event reads it again. Under 0.4.45, with no sandoq, no seat known, or a peek
+  that does not answer in json, the band is as it was. The pane reads
+  `sandoq room peek --json --room ROOM --seat SEAT` (it writes nothing and moves no cursor) on
+  events alone: the session start, a prompt, a turn's end, `/sandoq open` and `/sandoq shut` (and
+  the same words after `/room`), and the wake's hand-over of rows. The poll of two seconds never
+  reads it and a draw reads nothing; an event while a read runs asks one more read after it.
+  `/sandoq:seat-open` and `/sandoq:seat-shut` run the plugin's seatwake.ts and give the host no
+  command event: the next prompt or turn's end reads the seat then.
 
 Left out: the fonts of the mockups (a terminal draws the one monospace font you chose; the plugin
 cannot set it), the round avatar of a person (the kit draws no circle and a terminal cell is

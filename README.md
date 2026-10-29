@@ -1,4 +1,4 @@
-# room-pane 0.8.88
+# room-pane 0.8.89
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -345,7 +345,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.88 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.89 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -697,8 +697,11 @@ KNOWN:
 A mail that lands in the room is one card whose root holds `outside: true` and `mail: N`, N a whole
 number of 1 to 15 digits with no leading zero (`mailNumberOf` in `hooks/model/mail.ts` is the one
 test of it). The pane reads the fields of the mail from `mail/N.put.json` of the run, and no other
-path: a word of a card makes no path. A file that is gone, is no JSON or is not a mail's shape
-leaves the card drawn as it was. The text of the card is read for one thing only, six fixed lines
+path: a word of a card makes no path. The put file holds the fields. A card with none (the file is
+gone, is no JSON or is not a mail's shape) is drawn as a bare mail: the row `Mail N` with no
+sender, counted and rung like any mail, and its open card shows the text of the card whole (see
+below). A bare mail is not kept, so a put file that comes at a later read gives the full fields.
+The text of the card is read for one thing only, six fixed lines
 of sandoq, each shown as a note when the text holds it as a whole line:
 
 - `[fell back: no allow-list of the room matched]`
@@ -727,7 +730,9 @@ time alone. A date that does not parse is shown as it is. A file is only named: 
 from the listing of the folder `mail`, and no file of it is opened, and no press opens one. The
 app draws no composer of its own, so the chat box under the card is the host's; the terminal's bar
 says to the room and says `no mail goes out`. The Operator lens draws the card as it did and adds
-`mail N` to the head of its walk.
+`mail N` to the head of its walk. A bare mail (no put file) opens as `✉ Mail N` bold, `mail from
+outside` dim, the hairline, the text of the card whole as it was written (nothing of it is read
+for a sender) and the notes: no from line and no files.
 
 **The notice.** The dock's first word, in the warn tone, says the mails that came in this session
 and are not opened: `✉ 1 mail` and `✉ 2 mails` from 59 columns, `✉ 1` from 53 to 58, `✉ 9+` over
@@ -737,7 +742,8 @@ with the tiles, a fifth tile at the left, an envelope, its badge and the tip `1 
 already there when the pane opened counts nothing and rings nothing, each
 number counts once, and opening a mail clears its count. A press on the notice opens the Desk with
 the Mail pile; on the Desk it only switches the pile. One toast rings when a mail lands: `mail:
-NAME, SUBJECT`. The foot's rows never change with the notice: only the dock's width does.
+NAME, SUBJECT` (`mail: Mail N` for a bare mail). The foot's rows never change with the notice:
+only the dock's width does.
 
 KNOWN:
 

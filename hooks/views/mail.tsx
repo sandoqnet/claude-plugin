@@ -2,7 +2,8 @@
 // press on it opens this card a step from the desk. The strip over it is the pane's own (`‹ Desk`, `mail` dim, `Close`); the composer under it says `To the room` alone,
 // for the pane sends no mail. In order: the subject with its mark (two rows at the most), who it is from (the name, and the address dim where the card holds it), the
 // date line, a hairline, the body, the files by name and size (no press: the pane never opens a mail's file), and the fixed notes of sandoq, dim. The fields are those of
-// the mail's put file (model/mail.ts), never a parse of the card's text. A mail waits on nobody: no ask, no turn, no gate stands on it. Nothing scrolls: the card pages by
+// the mail's put file (model/mail.ts), never a parse of the card's text; a mail with no put file is a bare mail: `Mail N`, `mail from outside`, the hairline and the card's text
+// whole, with no from line and no files. A mail waits on nobody: no ask, no turn, no gate stands on it. Nothing scrolls: the card pages by
 // its lines, as an open card of his does (views/yourcard.tsx). In the app the size, the space and the color are the theme's and space's names; the terminal keeps the look's.
 import { dateWords, fileLine, mailRow } from '../model/mail'
 import type { MailCard } from '../model/mail'
@@ -41,7 +42,7 @@ export type MailPart = { text: string; dim?: boolean; bold?: boolean }
 export type MailLine = { parts: MailPart[] }
 
 // The words of a mail's first line: the mark and the subject, or the feed's words where the mail has none.
-export const subjectOf = (card: MailCard): string => `${MAIL_MARK} ${card.mail.subject !== '' ? card.mail.subject : mailRow(card.mail)}`
+export const subjectOf = (card: MailCard): string => `${MAIL_MARK} ${card.mail.subject !== '' ? card.mail.subject : card.bare === true ? card.row : mailRow(card.mail)}`
 
 // The lines of an open mail at `inner` cells, the board's order. `narrow` leaves the address out of the from line and shortens the date to the time.
 export function mailLinesOf(card: MailCard, inner: number, narrow = false): MailLine[] {
@@ -50,12 +51,14 @@ export function mailLinesOf(card: MailCard, inner: number, narrow = false): Mail
   // 1 the subject, bold, two rows at the most and the last cut with an ellipsis
   const subject = wrapCells(subjectOf(card), inner)
   subject.slice(0, SUBJECT_ROWS).forEach((text, at) => lines.push(one(at === SUBJECT_ROWS - 1 && subject.length > SUBJECT_ROWS ? fitted(`${text}…`, inner) : text, { bold: true })))
-  // 2 who it is from: the name in the text tone, the address dim after it where the card holds it
+  // 2 who it is from: the name in the text tone, the address dim after it where the card holds it; a bare mail (no put file) has no from line
   const { from, date } = card.mail
-  const name = from.name !== '' ? from.name : from.address
-  const who = fitted(`from ${name}`, inner)
-  const room = inner - cellsOf(who) - cellsOf(' · ')
-  lines.push(from.name !== '' && !narrow && who === `from ${name}` && room >= cellsOf(from.address) ? { parts: [{ text: who }, { text: `· ${from.address}`, dim: true }] } : one(who))
+  if (card.bare !== true) {
+    const name = from.name !== '' ? from.name : from.address
+    const who = fitted(`from ${name}`, inner)
+    const room = inner - cellsOf(who) - cellsOf(' · ')
+    lines.push(from.name !== '' && !narrow && who === `from ${name}` && room >= cellsOf(from.address) ? { parts: [{ text: who }, { text: `· ${from.address}`, dim: true }] } : one(who))
+  }
   // 3 the date, dim
   lines.push(one(fitted(`mail from outside${date === '' ? '' : ` · ${dateWords(date, narrow)}`}`, inner), { dim: true }))
   // 4 the hairline

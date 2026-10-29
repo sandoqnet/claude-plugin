@@ -57,7 +57,7 @@ export type Walk = {
 }
 
 // A card is named by the ULID of its root block; the reader sees its first words, never the id.
-// `mail` is what the pane read of a mail card's put file (order G2 M1); none for any other card and for a mail card whose file was gone or not a mail's.
+// `mail` is what the pane read of a mail card's put file (order G2 M1); none for any other card; a mail card whose file was gone or not a mail's holds a bare mail (order C).
 export type Card = { id: string; text: string; raw: string; walk: Walk; mail?: MailCard }
 // A walk of the run folder, by its card id.
 export type WalkText = { id: string; text: string }

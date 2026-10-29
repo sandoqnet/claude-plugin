@@ -1,6 +1,6 @@
 // A mail as the pane draws it (order G2 M1): one mail that lands in the room is ONE card, the root of which holds `outside: true` and `mail: N`, N the
 // counter of the mail. The fields of the mail are NOT in the card's text: they are in `mail/N.put.json` of the run, which sandoq writes before the card
-// lands, and the pane reads that file and no other. A part of the Walk as `task` is (model/task.ts): pure, no `$`, no view. Run by `node` too: no enums,
+// lands, and the pane reads that file and no other; a card with none is drawn as a bare mail (bareMailCardOf). A part of the Walk as `task` is (model/task.ts): pure, no `$`, no view. Run by `node` too: no enums,
 // `import type`, `.ts` in imports.
 import { sizeWords } from './shelffiles.ts'
 
@@ -111,7 +111,20 @@ export function notesOf(text: string): string[] {
 export type ListedFile = { name: string; size: string }
 
 // What the pane holds of a mail card: the mail, its row, the notes and the files with their sizes. `sizes` are the sizes of the folder's listing, by file name.
-export type MailCard = { mail: Mail; row: string; notes: string[]; files: ListedFile[] }
+// `bare` is set on a mail whose put file is not there (order C): its `mail` holds no field but the number and the card's text, and every user of it says "Mail N".
+export type MailCard = { mail: Mail; row: string; notes: string[]; files: ListedFile[]; bare?: true }
+
+// A mail card with no put file (absent, no JSON or the wrong shape) is still a mail: the row `Mail N`, no sender, no files, and the card's text whole as its body (never
+// read for a field). It is not kept: the next read of the walks looks for the put file again, and a file that came later gives the full fields.
+export function bareMailCardOf(n: number, cardText: string): MailCard {
+  return {
+    mail: { n, from: { name: '', address: '' }, to: [], subject: '', date: '', text: cardText, files: [] },
+    row: `Mail ${n}`,
+    notes: notesOf(cardText),
+    files: [],
+    bare: true,
+  }
+}
 
 export function mailCardOf(mail: Mail, cardText: string, sizes: ReadonlyMap<string, number>): MailCard {
   return {

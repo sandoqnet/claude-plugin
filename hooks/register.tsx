@@ -107,7 +107,7 @@ import type { LabWords } from './labwords'
 import { midEdit } from './midsay'
 import { BACKGROUND_MOST, backgroundKey, backgroundLine, backgroundOf, bytesOfText, keptFor } from './model/background'
 import type { Background, KeptBackground } from './model/background'
-import { TOAST_COLS, bellLine, fit, freshRings, keeperRing, mailRing } from './model/bell'
+import { TOAST_COLS, bareMailRing, bellLine, fit, freshRings, keeperRing, mailRing } from './model/bell'
 import type { Ring } from './model/bell'
 import { preview, stripUlid } from './model/blocks'
 import { CHAT_NO_CARD, CHAT_USAGE, chatCommandOf, chatLongWords, chatTooLong, chatWords, keptTap } from './model/chat'
@@ -122,7 +122,7 @@ import { drawnNow, failedNow, firstLine, noteFailure, resetDrawn } from './model
 import { ACTIONS, PLACES, THEMES, TOOL, isAction, isIn, kitThemeOf, noAction, noValue, themeWords, widthOf } from './model/driven'
 import type { KitTheme, ThemeAsk } from './model/driven'
 import { discNamesOf, roomDiscNamesOf } from './model/layouts'
-import { MAIL_FOLDER, mailCardOf, mailOf, mailPutName } from './model/mail'
+import { MAIL_FOLDER, bareMailCardOf, mailCardOf, mailOf, mailPutName } from './model/mail'
 import type { Mail } from './model/mail'
 import { clockText, keeperPicks, pendingTaps } from './model/motion'
 import type { PendingTap } from './model/motion'
@@ -1996,8 +1996,9 @@ async function readFiles($, root: string, withSeats: boolean): Promise<ShelfFile
 // THE MAIL (order G2 M1). A card whose root holds `outside: true` and `mail: N` is one mail, and its fields are in `mail/N.put.json` of the run, which the pane
 // reads and no other file (N is a whole number, so no word of a card makes a path). The listing of the folder `mail` gives the sizes of its files by name;
 // no file of it is opened. The read is made in the read of the walks, for the newest MOST_MAIL mails only, and what was read stays (a put file is written
-// before the card lands and is not written again); a file that is gone, is no JSON or is not a mail's shape leaves the card out of the list of mail, drawn
-// as it is today, and is looked for again at the next read.
+// before the card lands and is not written again); a file that is gone, is no JSON or is not a mail's shape gives the card drawn
+// as a bare mail (order C: `Mail N`, the card's text whole, no sender and no files) and is NOT kept, so it is looked for again at the next read: a put file that comes
+// later gives the full fields.
 const MOST_MAIL = 20
 const mailKept = new Map<string, { mail: Mail; sizes: Map<string, number> }>()
 // A walk whose text may hold a mail's root, told by its two lines before it is parsed.
@@ -2021,7 +2022,10 @@ async function readMailCards(io: Io, root: string, walks: WalkText[], shownCards
     let kept = mailKept.get(key)
     if (kept === undefined) {
       const mail = mailOf(n, await readText(io, host, `${root}/${MAIL_FOLDER}/${mailPutName(n)}`))
-      if (mail === undefined) continue
+      if (mail === undefined) {
+        out.push({ ...card, mail: bareMailCardOf(n, card.text) })
+        continue
+      }
       const sizes = new Map<string, number>()
       if (mail.files.length > 0) for (const entry of await listEntries(io, host, `${root}/${MAIL_FOLDER}`)) if (entry.size !== undefined) sizes.set(entry.name, entry.size)
       kept = { mail, sizes }
@@ -2255,7 +2259,7 @@ function announce($, next: Snapshot) {
 }
 
 // The mails of one read (order G2 M2): the first read of a session only seeds; after it a mail whose number was not seen is new: it counts in the dock's notice until it is
-// opened, and it rings once, as `mail: NAME, SUBJECT`. Oldest first, so the newest rings last. A mail that is a mail of the card list alone (no put file) is not among them.
+// opened, and it rings once, as `mail: NAME, SUBJECT`. Oldest first, so the newest rings last. A mail with no put file is a bare mail and rings as `mail: Mail N`.
 function announceMail(cards: Card[]): void {
   for (const card of [...cards].reverse()) {
     const n = card.walk.mail
@@ -2263,7 +2267,7 @@ function announceMail(cards: Card[]): void {
     mailSeen.add(n)
     if (!mailSeeded) continue
     mailNew.add(n)
-    bell.push(mailRing(card.mail.mail))
+    bell.push(card.mail.bare === true ? bareMailRing(n) : mailRing(card.mail.mail))
   }
   mailSeeded = true
 }

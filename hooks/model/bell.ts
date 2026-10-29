@@ -70,6 +70,9 @@ export function freshRings(items: DeskItem[], seen: ReadonlySet<string>): Ring[]
 // A mail that came in (order G2 M2) as it rings: `mail: NAME, SUBJECT`, NAME the sender's name else its address. A mail with no subject rings the sender alone.
 export const mailRing = (mail: Mail): Ring => ({ who: 'mail', text: flat(mail.subject) === '' ? senderOf(mail) : `${senderOf(mail)}, ${flat(mail.subject)}`, mail: true })
 
+// A mail with no put file (order C) rings by its number alone: `mail: Mail N`.
+export const bareMailRing = (n: number): Ring => ({ who: 'mail', text: `Mail ${n}`, mail: true })
+
 // What one read rings: nothing, the one line of one thing, or `desk: N new, waits on you` for two or more, with the newest WHO (the last of
 // the rings) after it where it fits.
 export function bellLine(rings: Ring[]): string {

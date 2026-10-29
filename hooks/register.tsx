@@ -1527,6 +1527,8 @@ const forgetDesk = (): void => {
   deskPageRun += 1
   deskRun += 1
   deskPolling = false
+  // A new session lists the desk as its first read, whatever the file holds.
+  deskListedText = undefined
   deskAsked = false
   // A new session reads the desk as its first: that read only seeds.
   itemSeen.clear()
@@ -1556,6 +1558,13 @@ const forgetDesk = (): void => {
 let deskPageKept = 0
 // A read of the desk by the poll is out: the next poll starts none until it ends.
 let deskPolling = false
+// The text of desk.md at the last list that gave items (order P1, the desk list leaves the idle poll): the poll reads the file's text each tick and
+// starts `sandoq room desk list` only when the text differs from this one. undefined is no good list yet. The path is the file sandoq reads for the
+// list: its DESK_FILE, shelves/room/desk.md, under the run folder, which is host.root (sandoq takes the run of the room from the folder the pane runs
+// it in, host.work, as `.sandoq`). A missing file reads as '' (sandoq: no file is no item), and so does a read that failed: the host's readText
+// gives '' for both, so a fault can only list when the last good text was not ''.
+let deskListedText: string | undefined
+const deskTextOf = ($): Promise<string> => readText(ioOf($), host, `${host.root}/shelves/room/desk.md`)
 // The desk was asked for (opened by a press or a tool), not only the place the session began on: the terminal draws it then, and not before.
 let deskAsked = false
 
@@ -1569,6 +1578,8 @@ async function readDesk($, quiet = false): Promise<void> {
     $.ui.invalidate('ui.render')
   }
   const before = JSON.stringify(desk)
+  // The text of the file first, before the list: the list that follows gives at least this text, and a change in between lists again at the next tick.
+  const text = await deskTextOf($)
   let items: DeskItem[] | undefined
   let older = false
   let line = ''
@@ -1594,6 +1605,7 @@ async function readDesk($, quiet = false): Promise<void> {
   // The doorbell (order T2): the first read of the desk only seeds; after it an item new and for him rings once, from this same read. A read that
   // gave no list (a refusal, a time out) seeds nothing and rings nothing.
   if (items !== undefined) {
+    deskListedText = text
     if (deskSeeded) bell.push(...freshRings(kept, itemSeen))
     for (const item of kept) itemSeen.add(item.id)
     deskSeeded = true
@@ -1602,6 +1614,15 @@ async function readDesk($, quiet = false): Promise<void> {
   // An item opened from the list that is gone from it (done by its Done, or by another hand) leaves its card: the desk stands again.
   if (nav.view === 'desk' && nav.item !== undefined && !open.has(nav.item)) await openNav($, { view: 'desk', ...(nav.pile === undefined ? {} : { pile: nav.pile }), ...(nav.group === undefined ? {} : { group: nav.group }) })
   if (!quiet || JSON.stringify(desk) !== before) $.ui.invalidate('ui.render')
+}
+
+// The poll's read of the desk (order P1): the text of desk.md first; a text that is the text of the last good list starts no list. The desk opening, a
+// Done and the tool read the list whatever the text (readDesk).
+async function deskPoll($): Promise<void> {
+  if (noSandoq()) return
+  const text = await deskTextOf($)
+  if (deskListedText !== undefined && text === deskListedText) return
+  await readDesk($, true)
 }
 
 // Done of an item: his alone. An item that is for a seat, or is not on the desk, makes no call; its line says so. One call at a time. A refusal of
@@ -2433,7 +2454,7 @@ async function readRoom($, token: { dead: boolean; before: number }) {
   if (!noSandoq() && !deskPolling) {
     deskPolling = true
     // A fault of the read (freshRings, ringBell, openNav) is noted and no unhandled rejection: the host drops a server that has one.
-    void readDesk($, true)
+    void deskPoll($)
       .catch(error => noteRead({ part: 'his desk', error }))
       .finally(() => {
         deskPolling = false

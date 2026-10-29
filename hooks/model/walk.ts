@@ -4,6 +4,8 @@
 import { ID_FIRST, blockWords, closerOf, depthsOf, fenceText, fmtMs, idOf, parentOf, parseBlocks, preview, stripUlid } from './blocks.ts'
 import type { Block } from './blocks.ts'
 import type { CatalogEntry } from './shelf.ts'
+import { mailNumberOf } from './mail.ts'
+import type { MailCard } from './mail.ts'
 import { taskOf } from './task.ts'
 import type { Task } from './task.ts'
 
@@ -28,6 +30,9 @@ export type Walk = {
   // The parts of a task notification (its name, status, ids and output file), drawn from the egress layout `task`;
   // none for any other card.
   task: Task | undefined
+  // The number of the mail a card is (order G2 M1): its root holds `outside: true` and `mail: N`, N a whole number. The fields of the mail are in
+  // `mail/N.put.json` of the run, read by the pane (model/mail.ts), never from the text. None for any other card.
+  mail: number | undefined
   answer: string
   answered: boolean
   steps: Step[]
@@ -52,7 +57,8 @@ export type Walk = {
 }
 
 // A card is named by the ULID of its root block; the reader sees its first words, never the id.
-export type Card = { id: string; text: string; raw: string; walk: Walk }
+// `mail` is what the pane read of a mail card's put file (order G2 M1); none for any other card and for a mail card whose file was gone or not a mail's.
+export type Card = { id: string; text: string; raw: string; walk: Walk; mail?: MailCard }
 // A walk of the run folder, by its card id.
 export type WalkText = { id: string; text: string }
 
@@ -194,7 +200,8 @@ const pairsOf = (frame: Block | undefined): [string, string][] =>
 
 // ---- who sent a card (order B-S7). The hook bridges every prompt of a session as a card, and the harness sends some
 // of them itself: a background task's notification, a reminder, a command's output, a subagent's hand-back.
-export type Source = 'harness' | 'person'
+// A mail (order G2 M1) is neither: it came from outside, no seat and no session said it, and it is never his word.
+export type Source = 'harness' | 'person' | 'mail'
 const ANY_TAG = /<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?>/g
 // THE RULE (order B-M5, one for the hook and the pane): a text whose first thing is an opening tag whose name holds a
 // hyphen is the harness's (agent-message, system-reminder, bash-input and the ones not yet seen). A tag with no hyphen
@@ -291,8 +298,10 @@ export function parseWalk(text: string): Walk {
   // A card with no words says its voice: the final transcript of its audio object.
   const voice = voiceOf(blocks)
   const said = voice === '' ? (source?.body ?? '') : heardText(blocks, voice)
+  // A mail card is the card of a mail (order G2 M1), whatever its body opens with; it waits on nobody: the asks the mail's text may hold are words.
+  const mail = mailNumberOf(source?.fence)
   // A harness card is named by its title, so every row and toast that names a card by its first words reads that.
-  const sent = sourceOf(said)
+  const sent: Source = mail === undefined ? sourceOf(said) : 'mail'
   const task = sent === 'harness' ? taskOf(said) : undefined
   const cardText = sent === 'harness' ? (task === undefined ? harnessRow(said) : harnessTitle(said)) : said
   const head = source ? `walk ${preview(cardText)} to ${fenceText(source, 'gate')} at ${fenceText(source, 'at')}` : ''
@@ -305,7 +314,7 @@ export function parseWalk(text: string): Walk {
     depth: depths[i],
   }))
   // An ask waits while no decision closes it.
-  const open = blocks.find(block => block.cho === 'ask' && closerOf(blocks, block) === undefined)
+  const open = mail === undefined ? blocks.find(block => block.cho === 'ask' && closerOf(blocks, block) === undefined) : undefined
   const choices: string[] = []
   if (open) {
     for (const child of blocks) {
@@ -327,6 +336,7 @@ export function parseWalk(text: string): Walk {
     source: sent,
     words: sent === 'harness' ? harnessLines(said).join('\n') : said,
     task,
+    mail,
     answer: answerBlock ? cleanAnswer(answerBlock.body) : '',
     answered: answerBlock !== undefined,
     frame: pairsOf(frame),

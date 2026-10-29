@@ -180,7 +180,8 @@ function choicesOf(blocks: Block[], ask: Block, turns: () => Turn[]): string[] {
 // Does an ask of a card wait on HIM. A card the harness sent (its source, read by parseWalk: the rule of order B-M5) is the
 // session's own: its asks wait on nobody in Public, no count, no toast, no dot, no target, and under Operator they show
 // as they are. One rule, the one the slot draws by; the face is the lens the person looks through.
-export const waitsOnHim = (source: string, face: string): boolean => source !== 'harness' || face === 'operator'
+// A mail (order G2 M1) is never his word: it waits on nobody on any face, whatever its text holds.
+export const waitsOnHim = (source: string, face: string): boolean => source !== 'mail' && (source !== 'harness' || face === 'operator')
 
 // Every ask of every walk, the open ones with their seat, the decided ones with the decision. The seat face, the level up,
 // the line of waits and the letter on the sill are all Public: a card of the harness has no ask in them.

@@ -89,7 +89,8 @@ export function cardView(props: GateCardProps) {
   // words. Its asks wait on nobody in Public: the door's question about a word of a harness message is not his to answer.
   const harness = card.walk.source === 'harness'
   const task = card.walk.task
-  const turns = () => (harness && !isOperator ? [] : turnView({ ui, face, card, asks: openAsks(card.raw), entries, walks, now, actions }))
+  // A mail (order G2 M1) waits on nobody on any face, so it has no turn.
+  const turns = () => (card.walk.source === 'mail' || (harness && !isOperator) ? [] : turnView({ ui, face, card, asks: openAsks(card.raw), entries, walks, now, actions }))
   const wordsView = () =>
     isListening(card.raw)
       ? boxView('TEXT', LISTENING, 'text', true)
@@ -275,7 +276,8 @@ function glassCardView(props: GateCardProps) {
   // (order B-M5): no gate, no "Waits for you", and its whole text is the operator face's alone.
   const harness = walk.source === 'harness'
   const waitsOnHim = walk.waiting && !harness
-  const gates = harness ? [] : gatesOf(card.raw)
+  // A mail (order G2 M1) holds no gate: whatever asks its text holds are words.
+  const gates = harness || walk.source === 'mail' ? [] : gatesOf(card.raw)
   const drawGate = (gate: (typeof gates)[number], rest = false) =>
     gateView({
       ui,

@@ -2,9 +2,11 @@
 // host, no view, and the asks are never copied: a row of the desk is the ask as seat.ts gives it, or an item as sandoq says it. The pane draws the
 // items as given and never reads the shelf's desk.md. Run by `node` too: no enums, `import type`, `.ts` in imports.
 import type { KeeperRow } from './keeperrow.ts'
+import { senderOf } from './mail.ts'
 import type { PageRead } from './page.ts'
 import type { ShapeAsk } from './roomfeed.ts'
 import type { SeatWait } from './seat.ts'
+import type { Card } from './walk.ts'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -36,8 +38,13 @@ export type DeskItem = {
 }
 
 // A row of the desk: an open ask of the room, the keeper's proposal to make a shape of an entry of his (a todo), the keeper's pick of an ask of his for
-// the day (order T3), or an item.
-export type DeskRow = { row: 'ask'; wait: SeatWait } | { row: 'shape'; shape: ShapeAsk } | { row: 'pick'; pick: KeeperRow } | { row: 'item'; item: DeskItem }
+// the day (order T3), an item, or a mail (order G2 M2): a card from outside, read from its put file by the register, that waits on nobody and counts as a row for him.
+export type DeskRow =
+  | { row: 'ask'; wait: SeatWait }
+  | { row: 'shape'; shape: ShapeAsk }
+  | { row: 'pick'; pick: KeeperRow }
+  | { row: 'item'; item: DeskItem }
+  | { row: 'mail'; card: Card }
 
 // What the register hands the view: the state of the read, the items it gave (open and done), the one line a call left under an item (by its
 // id) or under the head, the id of the item whose Done runs, the id of the item whose page was opened in his browser, and whether this
@@ -143,11 +150,12 @@ export function openItems(items: DeskItem[]): DeskItem[] {
 // The rows of ALL, the one order of the desk everywhere: his open letters first (the open asks of the room, in the order given: seat.ts gives them
 // oldest first), then the keeper's picks of the day on his asks (oldest first, as keeperRows gives them), then his open items oldest first across
 // the kinds, then the items that wait on a seat, oldest first. The keeper's open proposals of a shape (the fourth argument, in the order they were written)
-// stand with his letters, after the asks.
-export function deskRows(waits: SeatWait[], items: DeskItem[], picks: KeeperRow[] = [], shapes: ShapeAsk[] = []): DeskRow[] {
+// stand with his letters, after the asks. The mails (the fifth argument, newest first as the register gives them) stand first, on top because they are the newest.
+export function deskRows(waits: SeatWait[], items: DeskItem[], picks: KeeperRow[] = [], shapes: ShapeAsk[] = [], mails: Card[] = []): DeskRow[] {
   const open = openItems(items)
   const item = (one: DeskItem): DeskRow => ({ row: 'item', item: one })
   return [
+    ...mails.filter(card => card.mail !== undefined).map((card): DeskRow => ({ row: 'mail', card })),
     ...waits.map((wait): DeskRow => ({ row: 'ask', wait })),
     ...shapes.map((shape): DeskRow => ({ row: 'shape', shape })),
     ...picks.map((pick): DeskRow => ({ row: 'pick', pick })),
@@ -161,17 +169,23 @@ export function deskRows(waits: SeatWait[], items: DeskItem[], picks: KeeperRow[
 // An ask is a letter: it goes off by its answer, never by Done, and so is the keeper's pick of one (it goes off by OK or by his tap). An item is a
 // letter's kin by its kind (sign, decision, test, reading).
 export const LETTER = 'letter'
-export const rowKind = (row: DeskRow): string => (row.row === 'item' ? row.item.kind : LETTER)
+export const MAIL = 'mail'
+export const rowKind = (row: DeskRow): string => (row.row === 'item' ? row.item.kind : row.row === 'mail' ? MAIL : LETTER)
 // Whom a row waits on: an ask waits on him, a pick is his own to see, an item on its `for`. His rows are the desk's count.
 export const isHis = (row: DeskRow): boolean => row.row !== 'item' || row.item.for === YOU
 // Who put it ('' for an ask on a card of his own, and for a pick: the row says the keeper in its words).
-export const rowBy = (row: DeskRow): string => (row.row === 'ask' ? row.wait.from : row.row === 'shape' ? row.shape.by : row.row === 'pick' ? '' : row.item.by)
+// A mail is from outside: its pile by seat is `outside`.
+export const OUTSIDE = 'outside'
+export const rowBy = (row: DeskRow): string =>
+  row.row === 'ask' ? row.wait.from : row.row === 'shape' ? row.shape.by : row.row === 'pick' ? '' : row.row === 'mail' ? OUTSIDE : row.item.by
 // A pick lies on its ask: the ask is no open letter while it stands, so the key is the letter's own, and the ask opened from the pick is the open row.
 // A shape ask has its own id for both halves of the key: it lies on no card of the walks, and its press opens it as a wait of that id.
 export const rowKey = (row: DeskRow): string =>
   row.row === 'item'
     ? `item-${row.item.id}`
-    : row.row === 'shape'
+    : row.row === 'mail'
+      ? `mail-${row.card.id}`
+      : row.row === 'shape'
       ? shapeKey(row.shape.id)
       : `ask-${row.row === 'ask' ? `${row.wait.cardId}-${row.wait.askId}` : `${row.pick.cardId}-${row.pick.askId}`}`
 export const shapeKey = (id: string): string => `ask-${id}-${id}`
@@ -204,12 +218,12 @@ export const DESK_PILE = 'desk-pile:'
 // One pile a kind (Group `kind`) or one a seat that put something (Group `seat`), and ALL first: the open pile lists its rows, his before the
 // seats' (the order of deskRows). A pile with no row is not made. A pile's count is his rows alone.
 export type Group = 'kind' | 'seat'
-export type PileArt = 'all' | 'letter' | 'sign' | 'decision' | 'test' | 'reading' | 'seat'
+export type PileArt = 'all' | 'letter' | 'sign' | 'decision' | 'test' | 'reading' | 'seat' | 'mail'
 export type Pile = { key: string; name: string; head: string; rows: DeskRow[]; art: PileArt; tint: number }
 export const ALL_PILE = 'all'
-export const PILE_NAME: Record<string, string> = { letter: 'Letters', sign: 'Sign', decision: 'Decide', test: 'Test', reading: 'Read' }
-const PILE_HEAD: Record<string, string> = { all: 'All', letter: 'Letters', sign: 'To sign', decision: 'To decide', test: 'To test by hand', reading: 'To read' }
-const ART: PileArt[] = ['letter', 'sign', 'decision', 'test', 'reading']
+export const PILE_NAME: Record<string, string> = { mail: 'Mail', letter: 'Letters', sign: 'Sign', decision: 'Decide', test: 'Test', reading: 'Read' }
+const PILE_HEAD: Record<string, string> = { all: 'All', mail: 'Mail', letter: 'Letters', sign: 'To sign', decision: 'To decide', test: 'To test by hand', reading: 'To read' }
+const ART: PileArt[] = ['letter', 'sign', 'decision', 'test', 'reading', 'mail']
 
 export const hisCount = (rows: DeskRow[]): number => rows.filter(isHis).length
 // The seat name of a pile: who put the row, `you` for a card of his own.
@@ -219,13 +233,17 @@ export function pilesOf(rows: DeskRow[], group: Group): Pile[] {
   if (rows.length === 0) return []
   const all: Pile = { key: ALL_PILE, name: 'All', head: PILE_HEAD.all, rows, art: 'all', tint: 0 }
   if (group === 'kind') {
-    const kinds = [LETTER, ...DESK_KINDS].filter(kind => rows.some(row => rowKind(row) === kind))
+    // the Mail pile stands right after All, and only where it has rows
+    const kinds = [MAIL, LETTER, ...DESK_KINDS].filter(kind => rows.some(row => rowKind(row) === kind))
     return [all, ...kinds.map((kind): Pile => ({ key: kind, name: PILE_NAME[kind], head: PILE_HEAD[kind], rows: rows.filter(row => rowKind(row) === kind), art: ART[ART.indexOf(kind as PileArt)], tint: 0 }))]
   }
   const seats: string[] = []
   for (const row of rows) if (!seats.includes(seatOf(row))) seats.push(seatOf(row))
   return [all, ...seats.map((seat, tint): Pile => ({ key: `seat-${seat}`, name: seat, head: `From ${seat}`, rows: rows.filter(row => seatOf(row) === seat), art: 'seat', tint }))]
 }
+
+// The name of a mail's sender as its row says it: the name, else the address.
+export const mailSender = (row: Extract<DeskRow, { row: 'mail' }>): string => (row.card.mail === undefined ? '' : senderOf(row.card.mail.mail))
 
 // The pile the nav names, else the first (ALL).
 export const pileAt = (piles: Pile[], key: string | undefined): Pile | undefined => piles.find(pile => pile.key === key) ?? piles[0]

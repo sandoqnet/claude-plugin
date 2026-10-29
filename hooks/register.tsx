@@ -107,11 +107,11 @@ import type { LabWords } from './labwords'
 import { midEdit } from './midsay'
 import { BACKGROUND_MOST, backgroundKey, backgroundLine, backgroundOf, bytesOfText, keptFor } from './model/background'
 import type { Background, KeptBackground } from './model/background'
-import { TOAST_COLS, bellLine, fit, freshRings, keeperRing } from './model/bell'
+import { TOAST_COLS, bellLine, fit, freshRings, keeperRing, mailRing } from './model/bell'
 import type { Ring } from './model/bell'
 import { preview, stripUlid } from './model/blocks'
 import { CHAT_NO_CARD, CHAT_USAGE, chatCommandOf, chatLongWords, chatTooLong, chatWords, keptTap } from './model/chat'
-import { DESK_PILE, FROM_DESK, isDeskId, noDeskVerb, originOf, parseDeskList } from './model/desk'
+import { DESK_PILE, FROM_DESK, MAIL, isDeskId, noDeskVerb, originOf, parseDeskList } from './model/desk'
 import type { DeskCard, DeskItem } from './model/desk'
 import { leaveCard, openMore, toggleMore } from './model/expanded'
 import type { ExpandedByCard } from './model/expanded'
@@ -122,9 +122,11 @@ import { drawnNow, failedNow, firstLine, noteFailure, resetDrawn } from './model
 import { ACTIONS, PLACES, THEMES, TOOL, isAction, isIn, kitThemeOf, noAction, noValue, themeWords, widthOf } from './model/driven'
 import type { KitTheme, ThemeAsk } from './model/driven'
 import { discNamesOf, roomDiscNamesOf } from './model/layouts'
+import { MAIL_FOLDER, mailCardOf, mailOf, mailPutName } from './model/mail'
+import type { Mail } from './model/mail'
 import { clockText, keeperPicks, pendingTaps } from './model/motion'
 import type { PendingTap } from './model/motion'
-import { pagesKept } from './model/pages'
+import { OPEN_PAGE, pagesKept } from './model/pages'
 import { PAGE_MOST, PAGE_NO_FOLDER, PAGE_OTHER, PAGE_TOO_BIG, pageEmpty, pageFailed, pageKindOf, pageLine, pageMedia, pageMissing, pagePathOf } from './model/page'
 import type { PageRead } from './model/page'
 import { addKeys, keyLineSet, readKeys } from './model/keys'
@@ -219,6 +221,9 @@ const CARD_FILE = /^[0-9A-Za-z]{20,}\.md$/
 type Snapshot = {
   exists: boolean
   cards: Card[]
+  // The mails of the room (order G2 M1): the newest cards whose root holds `outside: true` and a whole `mail`, with the mail read from their put file, newest
+  // first. A mail whose file is gone or not a mail's is not among them.
+  mails: Card[]
   // How many cards the gate holds, of which `cards` are the newest `shown`.
   total: number
   records: ShelfRecord[]
@@ -259,6 +264,7 @@ const emptySnap = (): Snapshot => ({
   background: undefined,
   exists: false,
   cards: [],
+  mails: [],
   total: 0,
   records: [],
   entries: [],
@@ -408,6 +414,11 @@ const pickSeen = new Set<string>()
 const itemSeen = new Set<string>()
 let deskSeeded = false
 let bell: Ring[] = []
+// THE MAIL NOTICE (order G2 M2): the numbers of the mails read (the first read of a session only seeds them), and the numbers of those that came in this session and are not
+// opened yet. A number counts once, whatever the card that holds it, so a reload or a replay of a walk counts none twice. In memory only.
+const mailSeen = new Set<number>()
+let mailSeeded = false
+const mailNew = new Set<number>()
 const tapped = new Set<string>()
 // The keeper's shape asks he tapped (their ids): the ask is one tap, so its Yes and No are held from the tap until the feed is read with the decided block. In memory only.
 const shapeSent = new Set<string>()
@@ -1521,6 +1532,11 @@ const forgetDesk = (): void => {
   itemSeen.clear()
   deskSeeded = false
   bell = []
+  // and the mails of a new session: those already there count nothing and ring nothing
+  mailSeen.clear()
+  mailSeeded = false
+  mailNew.clear()
+  mailKept.clear()
   // A new session reads what he took off by OK from the pane's own file again.
   keeperOk = new Set<string>()
   keeperOkRoot = undefined
@@ -1956,6 +1972,45 @@ async function readFiles($, root: string, withSeats: boolean): Promise<ShelfFile
   return read
 }
 
+// THE MAIL (order G2 M1). A card whose root holds `outside: true` and `mail: N` is one mail, and its fields are in `mail/N.put.json` of the run, which the pane
+// reads and no other file (N is a whole number, so no word of a card makes a path). The listing of the folder `mail` gives the sizes of its files by name;
+// no file of it is opened. The read is made in the read of the walks, for the newest MOST_MAIL mails only, and what was read stays (a put file is written
+// before the card lands and is not written again); a file that is gone, is no JSON or is not a mail's shape leaves the card out of the list of mail, drawn
+// as it is today, and is looked for again at the next read.
+const MOST_MAIL = 20
+const mailKept = new Map<string, { mail: Mail; sizes: Map<string, number> }>()
+// A walk whose text may hold a mail's root, told by its two lines before it is parsed.
+const maybeMail = (text: string): boolean => /^outside: true$/m.test(text) && /^mail: \d+$/m.test(text)
+async function readMailCards(io: Io, root: string, walks: WalkText[], shownCards: Card[]): Promise<Card[]> {
+  const held = new Map(shownCards.map(card => [card.id, card]))
+  const found: Card[] = []
+  for (let at = walks.length - 1; at >= 0 && found.length < MOST_MAIL; at -= 1) {
+    const { id, text } = walks[at]
+    if (text === '' || !maybeMail(text)) continue
+    const have = held.get(id)
+    const walk = have?.walk ?? parseWalk(text)
+    if (walk.mail !== undefined) found.push(have ?? { id, text: walk.text, raw: text, walk })
+  }
+  const standing = new Set(found.map(card => `${root}|${card.walk.mail}`))
+  for (const key of [...mailKept.keys()]) if (!standing.has(key)) mailKept.delete(key)
+  const out: Card[] = []
+  for (const card of found) {
+    const n = card.walk.mail as number
+    const key = `${root}|${n}`
+    let kept = mailKept.get(key)
+    if (kept === undefined) {
+      const mail = mailOf(n, await readText(io, host, `${root}/${MAIL_FOLDER}/${mailPutName(n)}`))
+      if (mail === undefined) continue
+      const sizes = new Map<string, number>()
+      if (mail.files.length > 0) for (const entry of await listEntries(io, host, `${root}/${MAIL_FOLDER}`)) if (entry.size !== undefined) sizes.set(entry.name, entry.size)
+      kept = { mail, sizes }
+      mailKept.set(key, kept)
+    }
+    out.push({ ...card, mail: mailCardOf(kept.mail, card.text, kept.sizes) })
+  }
+  return out
+}
+
 // The feed of the room: its file in the run's feed folder, named for the gate. No file is no entry; a file that is there and could not be read is none (the toasts
 // wait for the next read and the view keeps what it showed).
 async function readFeed(io: Io, dir: string): Promise<FeedEntry[] | undefined> {
@@ -2006,6 +2061,7 @@ async function readSnapshot($, isRoom: boolean, withDiscs: boolean, withSeats: b
       return { files, names, walks, cards }
     },
   )
+  const mails = await takeApart($, said, 'the mail', () => [] as Card[], () => readMailCards(io, ROOT, walks, cards))
   const { records, entries } = await takeApart(
     $,
     said,
@@ -2092,6 +2148,7 @@ async function readSnapshot($, isRoom: boolean, withDiscs: boolean, withSeats: b
   const feed = await takeApart($, said, 'the feed', () => undefined as FeedEntry[] | undefined, () => readFeed(io, `${ROOT}/feed`))
   return {
     exists: true,
+    mails,
     feed,
     background,
     shelfNames,
@@ -2172,7 +2229,31 @@ function announce($, next: Snapshot) {
     }
   }
   announceFeed(next.feed)
+  announceMail(next.mails)
   isSeeded = true
+}
+
+// The mails of one read (order G2 M2): the first read of a session only seeds; after it a mail whose number was not seen is new: it counts in the dock's notice until it is
+// opened, and it rings once, as `mail: NAME, SUBJECT`. Oldest first, so the newest rings last. A mail that is a mail of the card list alone (no put file) is not among them.
+function announceMail(cards: Card[]): void {
+  for (const card of [...cards].reverse()) {
+    const n = card.walk.mail
+    if (n === undefined || card.mail === undefined || mailSeen.has(n)) continue
+    mailSeen.add(n)
+    if (!mailSeeded) continue
+    mailNew.add(n)
+    bell.push(mailRing(card.mail.mail))
+  }
+  mailSeeded = true
+}
+
+// How many mails came in this session and are not opened: the numbers of mailNew that the list still holds, each number once whatever the cards that hold it.
+const mailsUnopened = (cards: Card[]): number => new Set(cards.flatMap(card => (card.walk.mail !== undefined && mailNew.has(card.walk.mail) ? [card.walk.mail] : []))).size
+
+// A mail is opened: its notice is cleared.
+function mailOpened(cardId: string): void {
+  const n = snap.mails.find(card => card.id === cardId)?.walk.mail
+  if (n !== undefined) mailNew.delete(n)
 }
 
 // The answers of the room's feed (order room-feed, part A): each answer whose `to` holds desk/toasts rings once by its id, its WHO the entry's sayer and its line the
@@ -2380,7 +2461,7 @@ async function readRoom($, token: { dead: boolean; before: number }) {
   outside('the signature of the draw')
   // The walks are in the signature by their sizes, and the minute, so the ages move on; so are the settings and the card of
   // their changes, as a file edited by hand draws once.
-  const now = JSON.stringify([host.mode, roomName(), drawnOf(next, pollNow), nav, shown, targetNow(), Math.floor(pollNow / 60000), settings, ownCard, isRead, lateLine(), needLine(), seatOpen === undefined ? '' : `${seatOpen.room}:${seatOpen.seat}:${seatOpen.last}:${seatOpen.note}`, host.maker ?? '', make, makerOld, start, yourIds, saidIds, yourCards.map(card => `${card.id}:${card.raw.length}`), urRead.card, urRead.text, urLine, urBusy, shelfSeen])
+  const now = JSON.stringify([host.mode, roomName(), drawnOf(next, pollNow), nav, shown, targetNow(), Math.floor(pollNow / 60000), settings, ownCard, isRead, lateLine(), needLine(), seatOpen === undefined ? '' : `${seatOpen.room}:${seatOpen.seat}:${seatOpen.last}:${seatOpen.note}`, host.maker ?? '', make, makerOld, start, yourIds, saidIds, yourCards.map(card => `${card.id}:${card.raw.length}`), next.mails.map(card => `${card.id}:${card.raw.length}`), urRead.card, urRead.text, urLine, urBusy, shelfSeen])
   if (now !== signature) {
     signature = now
     $.ui.invalidate('ui.render')
@@ -3642,7 +3723,7 @@ async function openNav($, nextWanted: Nav) {
   nav = next
   // The place the Room place or Settings came from: the Room place's card (Seats, the Shelf and Versions go back to it), and in the terminal Settings
   // goes back to the tab it was opened from, a section of it keeping that tab (views/pane.tsx terminalBackOf).
-  const isTabRoot = (place: Nav): boolean => (place.view === 'room' && place.card === undefined) || (place.view === 'desk' && place.item === undefined) || (place.view === 'shelf' && (place.of ?? '') === '')
+  const isTabRoot = (place: Nav): boolean => (place.view === 'room' && place.card === undefined) || (place.view === 'desk' && place.item === undefined && place.mail === undefined) || (place.view === 'shelf' && (place.of ?? '') === '')
   if (was.view === 'room' && was.card === undefined && next.view !== 'room') came = was
   else if (next.view === 'settings' && was.view !== 'settings' && isTabRoot(was)) came = was
   else if (!(was.view === 'settings' && next.view === 'settings')) came = undefined
@@ -3671,6 +3752,12 @@ async function openNav($, nextWanted: Nav) {
   pages = pagesKept(pages, was, next)
   // The desk's own pages: another pile or another sort starts on its first page; a letter opened from the list and the Back to it keep the page.
   if (next.view === 'desk' && was.view === 'desk' && (next.pile !== was.pile || next.group !== was.group)) pages = { ...pages, [DESK_LIST]: 0 }
+  // Another mail opened from the desk starts on its first page; its notice is cleared by the opening (order G2 M2).
+  if (next.view === 'desk' && was.view === 'desk' && next.mail !== was.mail && OPEN_PAGE in pages) {
+    const { [OPEN_PAGE]: _gone, ...rest } = pages
+    pages = rest
+  }
+  if (next.view === 'desk' && next.mail !== undefined) mailOpened(next.mail)
   if (was.view === 'desk' && next.view === 'wait' && next.from === FROM_DESK) deskPageKept = deskPage
   if (was.view === 'wait' && was.from === FROM_DESK && next.view === 'desk') pages = { ...pages, [DESK_LIST]: deskPageKept }
   // The composer says to a seat only while that seat's window stands open: a step to anywhere else puts it back to the room.
@@ -4043,6 +4130,7 @@ const actionsOf = ($): Actions => ({
   openItem: recordId => openNav($, { view: 'profile', recordId }),
   // This seat's own face is the seat named '': its name and '' are one place.
   openSeat: name => openNav($, { view: 'seat', name: name === seatNow() ? '' : name }),
+  openMail: () => openNav($, { view: 'desk', pile: MAIL, ...(nav.view === 'desk' && nav.group !== undefined ? { group: nav.group } : {}) }),
   openLevel: () => openNav($, { view: 'level' }),
   backToSeat: () => openNav($, { view: 'seat', name: '' }),
   moreItems: () => {
@@ -4375,6 +4463,8 @@ const paneOf = ($, e) => {
     landing: isRead ? landingNow($) : undefined,
     starter: isRead ? starterNow($) : undefined,
     yours: yourCards,
+    mails: snap.mails,
+    mailsNew: mailsUnopened(snap.mails),
     yourIds,
     saidIds,
     bridgeOff: isBridgeOff(envOf()),
@@ -4730,6 +4820,11 @@ export const register: Register = on => {
     // A clear region over a pile of the desk's picture opens that pile, the sort kept.
     if (typeof press === 'string' && press.startsWith(DESK_PILE)) {
       if (nav.view === 'desk') await openNav($, { view: 'desk', pile: press.slice(DESK_PILE.length), ...(nav.group === undefined ? {} : { group: nav.group }) })
+      return {}
+    }
+    // A press on the clear region over the mail notice (its word or its tile): the Desk with the Mail pile (order G2 M2).
+    if (press === 'mail') {
+      await openNav($, { view: 'desk', pile: MAIL, ...(nav.view === 'desk' && nav.group !== undefined ? { group: nav.group } : {}) })
       return {}
     }
     if (typeof press !== 'string' || !(DOCK_PLACES as readonly string[]).includes(press)) return {}

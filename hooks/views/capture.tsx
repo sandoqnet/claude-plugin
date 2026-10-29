@@ -81,6 +81,8 @@ export function nudgeToggle({ ui, nudge, leftCells, columns }: { ui: Ui; nudge: 
 const ROOM_PLACEHOLDER = 'write, paste, or drop anything'
 // The composer of an app: his kit's placeholder, and the two words of its target Select.
 const COMPOSER_PLACEHOLDER = 'Write, paste, or drop anything'
+// What the bar adds on a mail (order G2 M1): the words go to the room and no mail is sent.
+export const NO_MAIL = 'no mail goes out'
 const TO_ROOM = 'To the room'
 const TO_CARD = 'To this card'
 // The keeper's target on a letter opened from the desk (order keeper chat), beside the room, in the terminal's bar (the app draws no bar): the Buttons read the
@@ -104,14 +106,14 @@ export const ROOM_LINE = 'to the room'
 // kit draws one, with a hover on its Box to the accent key (the desktop app draws it; the CLI host refuses it): the Input
 // with its send, and under it a toolbar of a "+" and a Select of the target, which reads "To this card" while the words go
 // to the card (a reply, or the answer of its open ask) and "To the room" otherwise. The words do as above.
-export function captureView({ ui, nav, card, target, entries, surface, seatTo = '', keeper = '', actions, plan, columns, nudge }: CaptureProps & ComposerLayout) {
+export function captureView({ ui, nav, card, target, entries, surface, seatTo = '', keeper = '', mail = false, actions, plan, columns, nudge }: CaptureProps & ComposerLayout) {
   const { Box, Text, Button, Input, Select } = ui
   const { reply, about, setTarget } = actions
   // The words go to a seat (order D1, still A2: "Say to NAME" of a seat's window) when the app can say to one: the Select reads
   // "To NAME", its other option is the room, and a send is the register's say to that seat.
   const saying = isApp(surface) && seatTo !== '' && actions.sayTo !== undefined
-  // An ask of a card the harness sent waits on nobody here (order B-M5): the bar does not answer it.
-  const turn = nav.view === 'feed' && card && card.walk.source !== 'harness' ? turnsOf(card.raw, undefined, undefined, 0).find(item => item.isOpen) : undefined
+  // An ask of a card the harness sent waits on nobody here (order B-M5): the bar does not answer it. A mail's waits on nobody either (order G2 M1).
+  const turn = nav.view === 'feed' && card && card.walk.source === 'person' ? turnsOf(card.raw, undefined, undefined, 0).find(item => item.isOpen) : undefined
   const entry = nav.view === 'profile' && about ? entries?.find(item => item.id === nav.recordId) : undefined
   const name = entry ? stripUlid(entry.name) : ''
   const picking = nav.view === 'feed' && card !== undefined && turn === undefined && setTarget !== undefined && reply !== undefined
@@ -132,7 +134,9 @@ export function captureView({ ui, nav, card, target, entries, surface, seatTo = 
     if (answer.kind === 'tap') return actions.tap(card.id, turn.askId, answer.choice)
     actions.notice?.(answer.text)
   }
-  const label = toKeeper ? 'Say to the keeper' : saying ? `Say to ${seatTo}` : turn ? 'Answer this card' : entry ? `Say about ${name}` : toCard ? 'Reply to this card' : 'Say to the room'
+  // The place open is a mail (order G2 M1): the bar speaks to the room as on any card, and its label says that no mail is sent.
+  const base = toKeeper ? 'Say to the keeper' : saying ? `Say to ${seatTo}` : turn ? 'Answer this card' : entry ? `Say about ${name}` : toCard ? 'Reply to this card' : 'Say to the room'
+  const label = mail && !toKeeper && !saying && entry === undefined ? `${toCard ? 'Reply' : base} · ${NO_MAIL}` : base
 
   if (isApp(surface)) {
     const toWords = saying ? `To ${seatTo}` : turn !== undefined || toCard ? TO_CARD : TO_ROOM

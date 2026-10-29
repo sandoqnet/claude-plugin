@@ -5,17 +5,18 @@
 // picks, a link in his browser, any other item with its words and OPEN ORIGIN. Nothing scrolls (order P1): the list pages by the pane's one rule, and the
 // picture then the foot give way before the list does. The terminal draws the names as Buttons alone, no picture. Pure draw: the register gives the data
 // and the acts, and no view runs a process.
-import { DESK_PILE, ORIGIN_FROM, ORIGIN_MARK, ORIGIN_WORD, hasDone, hisCount, isHis, opensOrigin, pileAt, pilesOf, rowBy, rowKey, rowKind, rowOrigin } from '../model/desk.ts'
+import { DESK_PILE, ORIGIN_FROM, ORIGIN_MARK, ORIGIN_WORD, hasDone, hisCount, isHis, mailSender, opensOrigin, pileAt, pilesOf, rowBy, rowKey, rowKind, rowOrigin } from '../model/desk.ts'
 import type { DeskCard, DeskItem, DeskRow, Group, Pile } from '../model/desk.ts'
 import { FOLD_KEY, foldOf, foldWords, rowWords } from '../model/keeperrow.ts'
 import type { KeeperFold } from '../model/keeperrow.ts'
 import { PAGE_NOT_SHOWN } from '../model/page'
 import { pageAt, pageWords } from '../model/pages'
 import type { Page } from '../model/pages'
-import { ageWords } from '../model/profile'
+import { ageWords, ulidMs } from '../model/profile'
 import { shapeWords } from '../model/roomfeed'
 import { BUTTON_CELLS, buttonCells } from './cells'
 import { deskArt } from './deskart'
+import { MAIL_MARK, subjectOf } from './mail'
 import { pageView } from './page'
 import { EARLIER, moreWords } from './pager'
 import { CARD_ROWS } from './paged'
@@ -47,7 +48,7 @@ export const SHAPE_HELD = 'sent'
 // The least cells the app gives the title of a shape ask beside its Yes and No; under them the two stand in a line under the title.
 const SHAPE_TITLE_LEAST = 20
 
-const KIND_WORD: Record<string, string> = { letter: 'a letter', sign: 'to sign', decision: 'to decide', test: 'to test', reading: 'to read' }
+const KIND_WORD: Record<string, string> = { mail: 'mail', letter: 'a letter', sign: 'to sign', decision: 'to decide', test: 'to test', reading: 'to read' }
 
 // A picture is made once for its source and kept, so a draw for another cause hands the app the same element (no flicker).
 const keptDesk = new Map<string, { Svg: any; element: any }>()
@@ -117,15 +118,39 @@ export function wrapped(words: string, cells: number): string[] {
   return lines
 }
 
+// The first line of a mail's row (order G2 M2): `✉ SUBJECT`, or the words of the feed row where the mail has no subject.
+const mailWords = (row: Extract<DeskRow, { row: 'mail' }>): string => (row.card.mail === undefined ? MAIL_MARK : subjectOf(row.card.mail))
 const wordsOf = (row: DeskRow): string =>
-  row.row === 'ask' ? row.wait.title : row.row === 'shape' ? shapeWords(row.shape) : row.row === 'pick' ? rowWords(row.pick) : row.item.words
+  row.row === 'ask' ? row.wait.title : row.row === 'shape' ? shapeWords(row.shape) : row.row === 'pick' ? rowWords(row.pick) : row.row === 'mail' ? mailWords(row) : row.item.words
 const ageOf = (row: DeskRow, now: number): string =>
-  row.row === 'ask' ? row.wait.age : row.row === 'shape' ? ageWords(row.shape.atMs, now) : row.row === 'pick' ? ageWords(row.pick.atMs, now) : ageWords(row.item.atMs, now)
+  row.row === 'ask'
+    ? row.wait.age
+    : row.row === 'shape'
+      ? ageWords(row.shape.atMs, now)
+      : row.row === 'pick'
+        ? ageWords(row.pick.atMs, now)
+        : row.row === 'mail'
+          ? ageWords(ulidMs(row.card.id), now)
+          : ageWords(row.item.atMs, now)
+const senderName = (row: Extract<DeskRow, { row: 'mail' }>): string => mailSender(row)
 const forOf = (row: DeskRow): string => (row.row === 'item' ? row.item.for : 'you')
 
 // The dim line of one of his rows: the mark and the word of its origin, who put it (or its kind where the piles are the seats), the age where the
 // first line has none, and `for you` (or that its page opened in his browser).
-export function dimOf(row: DeskRow, group: Group, wide: boolean, now: number, opened: boolean): string {
+// A mail's second line (order G2 M2): `mail · from NAME · outside`, and `mail · NAME · outside` where the pane is narrow (under MAIL_FROM_AT columns). It holds no age:
+// the age stands at the right of the first line, whatever the width.
+export const MAIL_FROM_AT = 54
+// The line is ONE line: where the pane has too few cells for it the sender's name is cut (with an ellipsis), never the words `mail` or `outside`.
+export function mailDimOf(name: string, short: boolean, cells: number): string {
+  const at = (who: string): string => ['mail', `${short ? '' : 'from '}${who}`, 'outside'].filter(part => part !== '' && part !== 'from ').join(' · ')
+  const whole = at(name)
+  if (cellsOf(whole) <= cells || name === '') return whole
+  const bare = cellsOf(at('x')) - 1
+  return at(fitted(name, Math.max(1, cells - bare)))
+}
+
+export function dimOf(row: DeskRow, group: Group, wide: boolean, now: number, opened: boolean, short = false, cells = Number.POSITIVE_INFINITY): string {
+  if (row.row === 'mail') return mailDimOf(row.card.mail === undefined ? '' : senderName(row), short, cells)
   // The keeper's shape ask: the why, then who proposes it, the age where the first line has none.
   if (row.row === 'shape') return [row.shape.why, row.shape.by === '' ? '' : `by ${row.shape.by}`, ...(wide ? [] : [ageOf(row, now)])].filter(part => part !== '').join(' · ')
   const origin = rowOrigin(row)
@@ -204,12 +229,16 @@ export function deskView(props: DeskViewProps) {
             : inner
     const cells = boxW - PRESS.across
     if (!isHis(row)) return { first: `${ORIGIN_MARK[rowOrigin(row)]} ${wordsOf(row)}`, tail: '', dim: [], boxW }
-    const tail = wide ? ageOf(row, now) : ''
+    // a mail's age stands at the right of its first line at every width
+    const tail = wide || row.row === 'mail' ? ageOf(row, now) : ''
     // A pick has one dim line, the keeper's note cut to the width; no note, no line.
     if (row.row === 'pick') return { first: wordsOf(row), tail, dim: row.pick.note === '' ? [] : [fitted(row.pick.note, app ? cells : frameInner)], boxW }
     const opened = row.row === 'item' && board === row.item.id
     // The terminal's dim line is ONE line of the frame's width, cut where it is longer: a line never wraps, so an item is its two rows.
-    return { first: wordsOf(row), tail, dim: app ? wrapped(dimOf(row, group, wide, now, opened), cells) : [fitted(dimOf(row, group, wide, now, opened), frameInner)], boxW }
+    const short = columns < MAIL_FROM_AT
+    // a mail's subject is cut to what its age and the arrow leave (the box would drop the age before it cut a long subject): `✉ Which day works fo…  2m ›`
+    const first = row.row === 'mail' && app ? fitted(wordsOf(row), Math.max(1, cells - cellsOf(tail) - PRESS.apart - cellsOf('›') - PRESS.apart)) : wordsOf(row)
+    return { first, tail, dim: app ? wrapped(dimOf(row, group, wide, now, opened, short, cells), cells) : [fitted(dimOf(row, group, wide, now, opened, short, frameInner), frameInner)], boxW }
   }
   const lineOf = (row: Entry): string => (row.row === 'item' ? (card.lines[row.item.id] ?? '') : '')
   const heightOf = (row: Entry): number => {

@@ -91,7 +91,7 @@ export function feedOf(cards: Card[], cardId: string, now: number): FeedItem[] {
 // The quiet feed of the Operator lens (Settings, Shows: Gates and questions): only the cards where an ask first shows,
 // a gate or an input form, answered or not; the card named stays, so a card he opened is never hidden from him.
 export function quietOf(cards: Card[], keepId = ''): Card[] {
-  return cards.filter(card => card.id === keepId || parseBlocks(card.raw).some(block => block.cho === 'ask'))
+  return cards.filter(card => card.id === keepId || (card.walk.mail === undefined && parseBlocks(card.raw).some(block => block.cho === 'ask')))
 }
 
 // One ask that waits: its question and the first words of its card.
@@ -103,6 +103,8 @@ export function stripOf(cards: Card[]): Strip {
   const rows: StripRow[] = []
   const keeper: StripRow[] = []
   for (const card of oldestFirst(cards)) {
+    // a mail waits on nobody (order G2 M1)
+    if (card.walk.mail !== undefined) continue
     const blocks = parseBlocks(card.raw)
     for (const ask of blocks) {
       if (ask.cho !== 'ask' || closerOf(blocks, ask) !== undefined) continue

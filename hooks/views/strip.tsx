@@ -21,6 +21,8 @@ export type StripProps = {
   width: number
   columns?: number
   title: string
+  // The title is quiet: dim, not bold (the open mail's `mail`).
+  quiet?: boolean
   back?: StripAct & { label: string }
   close?: StripAct & { id: string }
 }
@@ -37,7 +39,7 @@ export function stripPartsOf(width: number, columns: number | undefined, title: 
   return { back, close, title: room, shown: room >= STRIP.titleShown ? fitted(title, room) : '' }
 }
 
-export function stripView({ ui, id, width, columns, title, back, close }: StripProps) {
+export function stripView({ ui, id, width, columns, title, quiet = false, back, close }: StripProps) {
   const { Box, Text } = ui
   const parts = stripPartsOf(width, columns, title, back?.label, close !== undefined)
   return (
@@ -46,7 +48,7 @@ export function stripView({ ui, id, width, columns, title, back, close }: StripP
         {back !== undefined && pressBox({ ui, id: 'back-room', label: back.label, width: parts.back, ...(back.hotkey === undefined ? {} : { hotkey: back.hotkey }), onPress: back.press })}
         <Box key={`${id}-title`} width={parts.title} height={pressHigh()} alignItems="center" justifyContent="center">
           {parts.shown !== '' && (
-            <Text key={`${id}-words`} bold>
+            <Text key={`${id}-words`} {...(quiet ? { color: THEME.dim } : { bold: true })}>
               {parts.shown}
             </Text>
           )}

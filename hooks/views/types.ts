@@ -58,7 +58,7 @@ export type Nav =
   // His desk (order DESK): what waits on him, the open asks then the items sandoq lists. The pane opens on it. `pile` is the pile open (the key
   // of model/desk.ts pilesOf; none is ALL), `group` how the piles are made (a pile a kind, or a folder a seat; none is a kind) and `item` the id of
   // the item opened from the list, a step from the desk (a letter opens as a `wait` from FROM_DESK).
-  | { view: 'desk'; pile?: string; group?: DeskGroup; item?: string }
+  | { view: 'desk'; pile?: string; group?: DeskGroup; item?: string; mail?: string }
 
 // What the last check of the discs gave: its hour (HH:MM) and the state word of each disc by its name. Made only after a check.
 export type DiscChecks = { at: string; states: Record<string, string> }
@@ -115,6 +115,8 @@ export type Actions = {
   // The head's path (order A-S1): "us" goes one level up, a seat opens its face, and "Back to SEAT" returns to this
   // seat's face, the lens kept.
   openSeat?: (name: string) => void | Promise<void>
+  // The press on the dock's mail notice (order G2 M2): the Desk with the Mail pile open; on the Desk already it only switches the pile.
+  openMail?: () => void | Promise<void>
   openLevel?: () => void | Promise<void>
   backToSeat?: () => void | Promise<void>
   // The Shut of the seat card of a session that is the seat of a joined room: it does what `/sandoq shut` does.
@@ -238,6 +240,10 @@ export type PaneProps = {
   // Your cards (order YC, Y2b): the session ids of this folder from room-pane-sessions.json (newest first), the ids of the cards a say of the
   // pane made in this session, and whether the plugin option turned the bridge off (the line of where to write says so).
   yours?: Card[]
+  // The mails of the room (order G2 M1), newest first, each with the mail read from its put file: the list Mail under Your cards in Letters.
+  mails?: Card[]
+  // How many mails came in this session and are not opened (order G2 M2): the dock's notice, in the warn key. None is none.
+  mailsNew?: number
   yourIds?: string[]
   saidIds?: string[]
   bridgeOff?: boolean
@@ -444,6 +450,8 @@ export type CaptureProps = {
   // The card of a letter opened from the desk that the bar can chat about (its bare id), '' or none for any other place: the bar then offers the keeper on this
   // card beside the room, and a send to it is `actions.chat`.
   keeper?: string
+  // The place open is a mail (order G2 M1): the bar speaks to the room as on any card, and its label says that no mail goes out.
+  mail?: boolean
   // The catalog, for the name of the open profile.
   entries?: CatalogEntry[]
   // The host's surface: an app draws the composer on glass, anything else the terminal's bar.

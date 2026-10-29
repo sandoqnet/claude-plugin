@@ -5,14 +5,23 @@
 // HIM, in the amber of a wait with its numeral and its ring; Seats, the seats that wait, NOT amber: a deep disc of the made ground with
 // its numeral in the text tone. Over 9 it says 9+, and none stands at zero. The Shelf has no numeral: a small dot in the dim tone at the
 // corner while a record is new on it (order T4a). Pure: no host.
-import { TILE_CELL, TILE_ROWS } from './dock'
+import { TILE_CELL, TILE_ROWS, noticeTip } from './dock'
 import type { DockSlot } from './dock'
 import { CELL } from './scene'
 
 const ICON = 40
 const PLATE = 34
 
-const MARKS: Record<DockSlot, (x: number, y: number) => string> = {
+// The fifth tile (order G2 M2): the mail notice, at the left of the four while a mail that came in this session is not opened.
+export type TilePlace = DockSlot | 'mail'
+
+const MARKS: Record<TilePlace, (x: number, y: number) => string> = {
+  // The mail: an envelope, its flap folded, on an ochre plate (3.0 against the white and the black ground and under the cream of its glyph).
+  mail: (x, y) =>
+    `<rect x="${x}" y="${y}" width="${ICON}" height="${ICON}" rx="10" fill="#a8671a"/>` +
+    `<rect x="${x + 7}" y="${y + 11}" width="26" height="18" rx="2.5" fill="#fff3dc"/>` +
+    `<path d="M${x + 7.8} ${y + 12.4} L ${x + 20} ${y + 22.2} L ${x + 32.2} ${y + 12.4}" fill="none" stroke="#a8671a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+    `<path d="M${x + 8.6} ${y + 27.6} L ${x + 16.2} ${y + 19.6} M${x + 31.4} ${y + 27.6} L ${x + 23.8} ${y + 19.6}" stroke="#a8671a" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>`,
   // The desk: a sheet of paper with its lines on a green blotter, and a pen across the corner.
   desk: (x, y) =>
     `<rect x="${x}" y="${y}" width="${ICON}" height="${ICON}" rx="10" fill="#4f7a6a"/>` +
@@ -42,7 +51,7 @@ export type Picture = { source: string; width: number; height: number }
 export type TileTones = { solid: string; text: string; edge: string; dim?: string }
 
 // The picture of a tile: its cell in pixels, the plate centered, the ring while it is lit, and the badge for a count.
-export function tileOf(place: DockSlot, count: number, lit: boolean, tones: TileTones): Picture {
+export function tileOf(place: TilePlace, count: number, lit: boolean, tones: TileTones): Picture {
   const width = Math.round(TILE_CELL * CELL.width)
   const height = Math.round(TILE_ROWS * CELL.height)
   const x = (width - PLATE) / 2
@@ -62,7 +71,7 @@ export function tileOf(place: DockSlot, count: number, lit: boolean, tones: Tile
           `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#f2b65a" stroke="#955800" stroke-width="1.5"/>`
         : place === 'shelf'
         ? dot
-        : place === 'desk'
+        : place === 'desk' || place === 'mail'
           ? `<circle cx="${cx}" cy="${cy}" r="7" fill="#f2b65a" stroke="#955800" stroke-width="1.5"/><text x="${cx}" y="${base}" ${word} fill="#1a1a19">${shown}</text>`
           : `<circle cx="${cx}" cy="${cy}" r="7" fill="${tones.solid}" stroke="${tones.text}" stroke-width="1.5"/><text x="${cx}" y="${base}" ${word} fill="${tones.text}">${shown}</text>`
   const ringTop = Math.max(1, y - 3)
@@ -75,9 +84,11 @@ export function tileOf(place: DockSlot, count: number, lit: boolean, tones: Tile
 }
 
 // The line over a tile under the pointer: the place, its count in words (the Shelf's is what is new on it), and `open` when it is the lit one.
-export function tileTip(place: DockSlot, count: number, lit: boolean): string {
+export function tileTip(place: TilePlace, count: number, lit: boolean): string {
   const words =
-    place === 'desk'
+    place === 'mail'
+      ? noticeTip(count)
+      : place === 'desk'
       ? count > 0
         ? `Desk: ${count} waiting for you`
         : 'Desk: nothing waits for you'
@@ -92,5 +103,6 @@ export function tileTip(place: DockSlot, count: number, lit: boolean): string {
           : count > 0
             ? 'Settings: an update waits'
             : 'Settings'
-  return lit ? `${words} · open` : words
+  // the mail tile is never lit: its tip says `open` already
+  return lit && place !== 'mail' ? `${words} · open` : words
 }

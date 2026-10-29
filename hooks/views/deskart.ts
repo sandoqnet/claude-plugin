@@ -68,6 +68,14 @@ function pileArt(art: PileArt, tint: number): string {
         `<line x1="22" y1="8" x2="22" y2="32" stroke="${INK}" stroke-width="1"/>`,
         ...[13, 17, 21, 25].map(dy => `<line x1="8" y1="${dy}" x2="19" y2="${dy}" stroke="${INK}" stroke-opacity=".5"/><line x1="25" y1="${dy}" x2="36" y2="${dy}" stroke="${INK}" stroke-opacity=".5"/>`),
       ].join('')
+    case 'mail':
+      // an envelope with its flap, on the desk
+      return [
+        `<rect x="4" y="6" width="36" height="24" rx="2" fill="${PAPER}" stroke="${PAPER_SHADE}"/>`,
+        `<polyline points="4,8 22,22 40,8" fill="none" stroke="${INK}" stroke-width="1.4"/>`,
+        `<line x1="4" y1="29" x2="16" y2="19" stroke="${INK}" stroke-opacity=".4"/><line x1="40" y1="29" x2="28" y2="19" stroke="${INK}" stroke-opacity=".4"/>`,
+        `<rect x="30" y="9" width="7" height="7" rx="1" fill="${BADGE}" stroke="${INK}" stroke-width=".8"/>`,
+      ].join('')
     case 'seat': {
       const color = FOLDERS[tint % FOLDERS.length]
       return [paper(8, 4, 28, 22, -4), `<path d="M4 10 h12 l3 3 h21 v19 h-36 z" fill="${color}" stroke="#00000055"/>`, `<line x1="4" y1="16" x2="40" y2="16" stroke="#00000030"/>`].join('')

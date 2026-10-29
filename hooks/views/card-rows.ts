@@ -164,7 +164,7 @@ export function cardRows({ card, age, walks, width, columns, gate: extras }: Car
   const inner = innerOf(width, columns)
   const harness = walk.source === 'harness'
   const waitsOnHim = walk.waiting && !harness
-  const gates = harness ? [] : gatesOf(card.raw)
+  const gates = harness || walk.source === 'mail' ? [] : gatesOf(card.raw)
   const waiting = gates.filter(gate => gate.decision === undefined).slice(0, 1)
   const answer = answerOf(walk)
   const said = sayLine(walk, walks)

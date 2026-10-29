@@ -3,10 +3,12 @@
 // the tray's count and the desk are the press away.
 import { YOU } from './desk.ts'
 import type { DeskItem } from './desk.ts'
+import { senderOf } from './mail.ts'
+import type { Mail } from './mail.ts'
 
 // One thing that rang: WHO put it or asked, and WHAT it says (its kind word and its words, or the ask's words). `on` is what the words are on, where the feed's
 // answer says it: the line reads `WHO on ON: WHAT`, and WHO alone stays the name of the newest in a fold.
-export type Ring = { who: string; text: string; on?: string }
+export type Ring = { who: string; text: string; on?: string; mail?: boolean }
 
 // The width of one line of a toast, in characters: a line past it is cut with the ellipsis.
 export const TOAST_COLS = 72
@@ -65,11 +67,16 @@ export function freshRings(items: DeskItem[], seen: ReadonlySet<string>): Ring[]
     .map(itemRing)
 }
 
+// A mail that came in (order G2 M2) as it rings: `mail: NAME, SUBJECT`, NAME the sender's name else its address. A mail with no subject rings the sender alone.
+export const mailRing = (mail: Mail): Ring => ({ who: 'mail', text: flat(mail.subject) === '' ? senderOf(mail) : `${senderOf(mail)}, ${flat(mail.subject)}`, mail: true })
+
 // What one read rings: nothing, the one line of one thing, or `desk: N new, waits on you` for two or more, with the newest WHO (the last of
 // the rings) after it where it fits.
 export function bellLine(rings: Ring[]): string {
   if (rings.length === 0) return ''
   if (rings.length === 1) return ringLine(rings[0])
+  // two mails or more of one read, and nothing else: they wait on nobody, so the line does not say they wait on him
+  if (rings.every(ring => ring.mail === true)) return fit(`mail: ${rings.length} new, newest ${flat(rings[rings.length - 1].text)}`, TOAST_COLS)
   const head = `desk: ${rings.length} new, waits on you`
   const who = flat(rings[rings.length - 1].who)
   const full = who === '' ? head : `${head}, newest from ${who}`

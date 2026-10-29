@@ -69,6 +69,7 @@ import { motionView, traceLensView } from './trace'
 import { asksFit, yourCardView } from './yourcard'
 import { urPlaceView, urRowView } from './ur'
 import { letterTabs, openInAppView, walkView } from './walk'
+import { MAIL_TITLE, mailOpenView, mailsOf } from './mail'
 import { yoursBody } from './yours'
 import type { Expanded, Face, Lens, Nav, PaneProps, Starter, Ui } from './types'
 
@@ -1221,18 +1222,22 @@ const NO_DESK_CARD: DeskCard = { state: 'rest', items: [], lines: {}, line: '', 
 // The rows of his desk: this seat's open asks (the letters), the keeper's picks of the day on his asks he has not taken off (order T3), then the
 // items sandoq lists, in the one order of model/desk.ts.
 // The keeper's open shape asks (the proposals to make a todo, read from the feed) stand with his letters.
-type DeskState = Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now' | 'zone' | 'entries' | 'deskCard' | 'keeperOk' | 'feed'>
+type DeskState = Pick<RoomState, 'walks' | 'seatsText' | 'seat' | 'now' | 'zone' | 'entries' | 'deskCard' | 'keeperOk' | 'feed' | 'mails'>
 const deskRowsOf = (state: DeskState): DeskRow[] =>
   deskRows(
     seatFace({ walks: state.walks, seatsText: state.seatsText ?? '', seat: state.seat ?? '', now: state.now, zone: state.zone, entries: state.entries }).waits,
     (state.deskCard ?? NO_DESK_CARD).items,
     keeperRows({ walks: state.walks, seatsText: state.seatsText ?? '', seat: state.seat ?? '', now: state.now, zone: state.zone, entries: state.entries }, new Set(state.keeperOk ?? [])),
     openShapes(state.feed),
+    mailsOf(state.mails ?? []),
   )
 
 // The count the dock and the tray say: the rows that wait on him, letters, the keeper's shape asks, the keeper's picks and his open items; none for a seat's.
 // The terminal's Desk N, its status line and the band over the prompt (the register's bandText) say this one number.
 export const deskCountOf = (state: DeskState): number => hisCount(deskRowsOf(state))
+// What WAITS on him: the same count with no mail in it (order G2 M2). A mail is a row of the desk and counts in `Desk N` and in `N for you`, but it waits on nobody: the tray's
+// `N wait`, the terminal's status line and the band say this one.
+export const waitCountOf = (state: DeskState): number => hisCount(deskRowsOf({ ...state, mails: [] }))
 
 // The shape ask a wait names: the desk opens it as a wait whose card and ask are its own id (a letter's card and ask are two ids). Open or closed.
 function shapeOfNav({ nav, feed }: Pick<RoomState, 'nav' | 'feed'>): ShapeAsk | undefined {
@@ -1259,6 +1264,24 @@ function deskPlace(state: RoomState) {
   const group = nav.group ?? 'kind'
   const keep = { ...(nav.pile === undefined ? {} : { pile: nav.pile }), ...(nav.group === undefined ? {} : { group: nav.group }) }
   const item = nav.item === undefined ? undefined : card.items.find(one => one.id === nav.item && !one.done)
+  // A mail opened from the Desk (order G2 M2): the card of views/mail.tsx, paged with no scroll. A mail that left the list is said so.
+  if (nav.mail !== undefined) {
+    const room = state.rows === undefined ? undefined : canvasRowsNow(state) - LINK_ROWS
+    return [
+      ...noRoomView(state),
+      mailOpenView({
+        ui,
+        surface: surfaceOf(state),
+        plan: state.plan,
+        columns: state.columns,
+        card: mailsOf(state.mails ?? []).find(one => one.id === nav.mail),
+        rows: state.app ? room : state.termRoom,
+        pages: state.pages,
+        onPage: page => void actions.page?.(OPEN_PAGE, page),
+        back: state.app ? undefined : { label: BACK_DESK, press: () => void actions.open({ view: 'desk', ...keep }) },
+      }),
+    ]
+  }
   if (item !== undefined) {
     const room = state.rows === undefined ? undefined : canvasRowsNow(state) - LINK_ROWS
     // A page item opens in the room app (order O3) where the room's sandoq has the page verb and the path of its origin passes the rule of roomPagePath.
@@ -1321,6 +1344,8 @@ function deskPlace(state: RoomState) {
           if (row.row === 'shape') return void actions.open({ view: 'wait', cardId: row.shape.id, askId: row.shape.id, from: FROM_DESK, ...keep })
           // The keeper's pick: Change opens the ask it answered, as a letter opens, with its choices.
           if (row.row === 'pick') return void actions.open({ view: 'wait', cardId: row.pick.cardId, askId: row.pick.askId, from: FROM_DESK, ...keep })
+          // A mail opens a step from the desk, in the card of views/mail.tsx (order G2 M2); opening it clears its notice.
+          if (row.row === 'mail') return void actions.open({ view: 'desk', ...keep, mail: row.card.id })
           // A link opens in his browser and the row says so; any other item opens a step from the desk.
           if (row.item.opens.kind === 'https') return void actions.openOrigin?.(row.item.origin, row.item.id)
           return void actions.open({ view: 'desk', ...keep, item: row.item.id })
@@ -1471,7 +1496,7 @@ function terminalBackOf(state: RoomState): { words: string[]; press: () => void 
 
 // Whether the place open is a root of one of the three tabs: it has no Back, the tab is its way.
 const isTabRoot = (nav: Nav): boolean =>
-  (nav.view === 'desk' && nav.item === undefined) || (nav.view === 'shelf' && (nav.of === undefined || nav.of === '')) || (nav.view === 'room' && nav.card === undefined && nav.from === undefined)
+  (nav.view === 'desk' && nav.item === undefined && nav.mail === undefined) || (nav.view === 'shelf' && (nav.of === undefined || nav.of === '')) || (nav.view === 'room' && nav.card === undefined && nav.from === undefined)
 
 // Whether the small terminal is at rest: the bar and its keys alone, the seat's own face with nothing open (the register shows the seat's face
 // in place of the desk there). A room that is not read or not there says so in the place, so it is never at rest.
@@ -1670,7 +1695,7 @@ function backOf(state: RoomState): Back | undefined {
   if (nav.view === 'seat' && nav.name !== '' && nav.name !== seat) return { label: '‹ Seats', press: () => void actions.openLevel?.() }
   // the desk: its root has the Sort box where another place has its Back (a pile a kind, or a folder a seat); a letter or an item opened from it
   // goes back to the desk, on the pile and the sort it came from. A clear desk (no rows) has nothing to sort: no box.
-  if (nav.view === 'desk' && nav.item === undefined) {
+  if (nav.view === 'desk' && nav.item === undefined && nav.mail === undefined) {
     if (deskRowsOf(state).length === 0) return undefined
     const group = nav.group ?? 'kind'
     return { label: `Sort ${group}`, press: () => void actions.open({ view: 'desk', group: group === 'kind' ? 'seat' : 'kind' }) }
@@ -1716,7 +1741,7 @@ function backOf(state: RoomState): Back | undefined {
 export function listOf(nav: Nav, seat: string, face: Face): Nav | undefined {
   if (nav.view === 'seat' && nav.name !== '' && nav.name !== seat && face === 'public') return { view: 'level' }
   // an item or a letter opened from the desk stands in the right column, the desk at the left on the pile it came from
-  if (nav.view === 'desk' && nav.item !== undefined) return { view: 'desk', ...(nav.pile === undefined ? {} : { pile: nav.pile }), ...(nav.group === undefined ? {} : { group: nav.group }) }
+  if (nav.view === 'desk' && (nav.item !== undefined || nav.mail !== undefined)) return { view: 'desk', ...(nav.pile === undefined ? {} : { pile: nav.pile }), ...(nav.group === undefined ? {} : { group: nav.group }) }
   if (nav.view === 'wait' && nav.from === FROM_DESK) return { view: 'desk', ...(nav.pile === undefined ? {} : { pile: nav.pile }), ...(nav.group === undefined ? {} : { group: nav.group }) }
   // a wait opened from a seat's window stands in the right column, the Seats place at the left (a wait is a window of its own)
   if (nav.view === 'wait') return { view: 'level' }
@@ -1735,6 +1760,7 @@ export function listOf(nav: Nav, seat: string, face: Face): Nav | undefined {
 // The title of a window: the desk's own words (its place, the word of the origin of an item opened from it, a letter), else the strip's.
 function titleOf(state: RoomState, nav: Nav): string {
   if (nav.view === 'desk') {
+    if (nav.mail !== undefined) return MAIL_TITLE
     const item = nav.item === undefined ? undefined : state.deskCard?.items.find(one => one.id === nav.item && !one.done)
     return item === undefined ? 'Desk' : itemTitleOf(item)
   }
@@ -1782,6 +1808,8 @@ function canvasView(state: RoomState, body: any[], failure: any, list?: any[]) {
       width: plan.width,
       columns: state.columns,
       title,
+      // the open mail's title is `mail`, dim (the board, part 3)
+      quiet: title === MAIL_TITLE && nav.view === 'desk' && nav.mail !== undefined,
       ...(parts.back === undefined ? {} : { back: { label: parts.back.label, press: parts.back.press, ...hotkeyProps(BACK_KEY) } }),
       close: parts.close,
     })
@@ -1822,7 +1850,7 @@ function canvasView(state: RoomState, body: any[], failure: any, list?: any[]) {
 // What waits on him in the terminal's status line, counted as the desk counts it (deskCountOf): "nothing waits on you" or "N waits on you"; on the
 // level up the seats' waits first, "T waiting, N on you".
 function deskWaitsLine(state: RoomState, isLevel: boolean): string {
-  const mine = deskCountOf(state)
+  const mine = waitCountOf(state)
   const total = isLevel ? level({ walks: state.walks, seatsText: state.seatsText ?? '', seat: state.seat ?? '', now: state.now, zone: state.zone, entries: state.entries }).total : 0
   if (total > 0) return `${total} waiting, ${mine} on you`
   return waitsOnYouWords(mine)
@@ -1969,6 +1997,8 @@ export function paneView(props: PlaceProps) {
           surface: surfaceOf(state),
           seatTo: state.seatTo,
           keeper: chatCardOf(nav, props.walks, state.feed),
+          // the place open is a mail (order G2 M1): the card the Operator lens has open, or the mail opened from the list Mail
+          mail: nav.view === 'desk' ? nav.mail !== undefined : mailsOf(props.mails ?? []).some(card => card.id === barCard?.id),
           actions,
           columns: bodyColumns,
           ...(nudgeBar === undefined ? {} : { nudge: nudgeBar }),
@@ -2052,6 +2082,8 @@ export function paneView(props: PlaceProps) {
   const seatsWaiting = level({ walks: props.walks, seatsText: props.seatsText ?? '', seat: props.seat ?? '', now, zone, entries }).waiting
   // What waits on him, the letters and his open items: the tray says it, and the Desk of the dock counts it.
   const waiting = deskCountOf(state)
+  // The tray's `N wait` is what waits on him, and a mail waits on nobody.
+  const waits = waitCountOf(state)
   // The records new on the shelf since he last opened it (order T4a): the dock's Shelf says it quietly; none before the first read seeded the time.
   const fresh = freshCount({ walks: props.walks, entries, rulesText: props.rulesText ?? '', now, zone }, props.shelfSeen)
   // A press on the open place shuts its window; on any other it opens that place (the register's message of a region does the same).
@@ -2073,12 +2105,12 @@ export function paneView(props: PlaceProps) {
         date: dateText(now, zone),
         time: clockText(now, zone),
         lens: face === 'public' ? '' : cap(face),
-        wait: waiting,
+        wait: waits,
         update: props.flow?.word ?? '',
         doorUp: isDoorUp,
         doorWords: props.doorWord ?? '',
       })}
-      {dockView({ ui, columns: bodyColumns, tones, open, desk: waiting, seats: seatsWaiting, fresh, settingsDot: props.flow?.dot === true, actions: { open: pressed } })}
+      {dockView({ ui, columns: bodyColumns, tones, open, desk: waiting, seats: seatsWaiting, fresh, settingsDot: props.flow?.dot === true, mails: props.mailsNew ?? 0, actions: { open: pressed, mail: () => void actions.openMail?.() } })}
     </Box>
   )
 }

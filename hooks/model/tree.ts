@@ -94,7 +94,7 @@ const longestMs = (card: Card): number =>
 
 // The head of the walk panel: the card's id, when it ended (its time and its longest block), its chip, and
 // "wall 5.58s · 12 events · 9 blocks".
-export type PanelHead = { id: string; ended: string; chip: PanelChip; wall: string; events: number; blocks: number }
+export type PanelHead = { id: string; ended: string; chip: PanelChip; wall: string; events: number; blocks: number; mail?: number }
 
 export function panelHead(card: Card, zone = 0): PanelHead {
   const blocks = parseBlocks(card.raw)
@@ -107,6 +107,7 @@ export function panelHead(card: Card, zone = 0): PanelHead {
     wall: `wall ${(longest / 1000).toFixed(2)}s`,
     events: eventsOf(card).length,
     blocks: blocks.length,
+    ...(card.walk.mail === undefined ? {} : { mail: card.walk.mail }),
   }
 }
 
@@ -124,7 +125,9 @@ export function tabsOf(card: Card, entries: CatalogEntry[], roomFiles: Record<st
 }
 
 // The wall, the events and the blocks of a head as one machine line.
-export const headLine = (head: PanelHead): string => `${head.wall} · ${countOf(head.events, 'event')} · ${countOf(head.blocks, 'block')}`
+// A mail's number leads it (order G2 M1): `mail 7 · wall ...`.
+export const headLine = (head: PanelHead): string =>
+  `${head.mail === undefined ? '' : `mail ${head.mail} · `}${head.wall} · ${countOf(head.events, 'event')} · ${countOf(head.blocks, 'block')}`
 
 // One row of the operator lens' list in the place, a card: his words, its state and its wall time. The tone is
 // what the view colors the state by: a card at an open ask waits (warn), a fault fails (fault), a held card

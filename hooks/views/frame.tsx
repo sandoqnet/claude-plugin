@@ -215,7 +215,9 @@ export type DockProps = {
   fresh?: number
   // An update waits, runs or failed (order PF1): a dot on the Settings tile, `Settings ●` in the words.
   settingsDot?: boolean
-  actions: { open: (place: DockPlace) => void | Promise<void> }
+  // The mails that came in this session and are not opened (order G2 M2): the notice, first in the dock, in the warn tone; none at zero. A press on it is `actions.mail`.
+  mails?: number
+  actions: { open: (place: DockPlace) => void | Promise<void>; mail?: () => void | Promise<void> }
 }
 
 // What a press on a place of the dock does, whether it comes from a word's Button or from a clear region over a cell (the register's
@@ -251,28 +253,42 @@ const BORDER = 1
 // (3 rows in one row of words, the word on the middle row, 2 rows in two rows of two) with the same clear region under it. THE OPEN WORD
 // has a rule, a line as wide as the word on the row under it, and the full ink; the others are dim with no rule, so the words never move
 // as the open place changes. model/dock.ts says the rows from the columns alone. No Button holds a hotkey.
-export function dockView({ ui, columns, tones, open, desk, seats, fresh = 0, settingsDot = false, actions }: DockProps) {
+export function dockView({ ui, columns, tones, open, desk, seats, fresh = 0, settingsDot = false, mails = 0, actions }: DockProps) {
   const { Box, Button, Text, Svg, Client } = ui
   const news = open === 'shelf' ? 0 : fresh
-  const dock = dockOf(columns, tilesOn() && Svg !== undefined && Client !== undefined, news > 0)
+  const dock = dockOf(columns, tilesOn() && Svg !== undefined && Client !== undefined, news > 0, mails)
   const counts: Record<DockPlace, number> = { desk, seats, shelf: news, settings: settingsDot ? 1 : 0 }
   const chip = { chip: tones.solid, ink: tones.text }
   // The clear region over a cell: a Client of the pane's own item module (hooks/item.tsx, a path from THIS file), placed over the cell,
   // that posts the press to the register. (`h` is the JSX factory of this file: no name of a size is `h`.)
-  const region = (place: DockPlace, across: number, high: number, tip: string, shift: number) =>
+  const region = (place: DockPlace | 'mail', across: number, high: number, tip: string, shift: number) =>
     Client !== undefined && (
       <Box key={`over-${place}`} position="absolute" top={tip === '' ? 0 : -SPACE.line} left={0} width={tip === '' ? across : TIP_MOST}>
         <Client key={`region-${place}`} module="../item.tsx" props={{ w: across, h: high, tip, tipAbove: tip !== '', tipShift: shift, press: place, ...chip }} />
       </Box>
     )
-  const picture = (place: DockPlace, lit: boolean, alt: string) => {
-    const art = tileOf(place, counts[place], lit, tones)
-    const key = `dock-icon-${place}-${counts[place] > 9 ? '9+' : counts[place]}-${lit ? `lit${tones.edge}` : 'rest'}-${tones.solid}${tones.text}`
+  const picture = (place: DockPlace | 'mail', lit: boolean, alt: string) => {
+    const count = place === 'mail' ? mails : counts[place]
+    const art = tileOf(place, count, lit, tones)
+    const key = `dock-icon-${place}-${count > 9 ? '9+' : count}-${lit ? `lit${tones.edge}` : 'rest'}-${tones.solid}${tones.text}`
     const held = keptTiles.get(key)
     if (held !== undefined && held.Svg === Svg) return held.element
     const element = <Svg key={key} source={art.source} alt={alt} width={art.width} height={art.height} />
     keptTiles.set(key, { Svg, element })
     return element
+  }
+  // The fifth tile (from 70 columns): the envelope, the count of the mails not opened on its corner, the line over it `N mail · open`.
+  const noticeTile = () => {
+    const line = tileTip('mail', mails, false)
+    const shift = Math.max(-(dock.left + BORDER + SPACE.near - EDGE), Math.min(0, columns - EDGE - (dock.left + BORDER + SPACE.near + line.length + 2 * SPACE.near)))
+    return (
+      <Box key="dock-cell-mail" flexDirection="column" alignItems="center" width={TILE_CELL}>
+        <Box key="dock-mark-mail" position="relative" width={TILE_CELL} height={TILE_ROWS}>
+          {picture('mail', false, line)}
+          {region('mail', TILE_CELL, TILE_ROWS, line, shift)}
+        </Box>
+      </Box>
+    )
   }
   return (
     <Box
@@ -288,12 +304,33 @@ export function dockView({ ui, columns, tones, open, desk, seats, fresh = 0, set
       paddingX={dock.tiles ? SPACE.near : SPACE.control}
     >
       <Box key="dock-places" flexDirection="row" flexWrap="wrap" justifyContent="center" columnGap={dock.gap}>
+        {dock.noticeTile === true && noticeTile()}
+        {dock.notice !== undefined && (
+          // The mail notice, first: the words in the warn tone over a plain Button that takes the press (the way the Settings dot stands over its word), the same cell, gap and row
+          // as the other words; the foot's rows never change with it.
+          <Box key="word-mail" position="relative" width={dock.noticeCell} height={dock.wordH} flexShrink={0} flexDirection="column" paddingTop={dock.wordH === 3 ? 1 : 0}>
+            {region('mail', dock.noticeCell ?? 0, dock.wordH, '', 0)}
+            <Button
+              key="mail"
+              plain
+              label={dock.notice}
+              onPress={() => {
+                void actions.mail?.()
+              }}
+            />
+            <Box key="word-mail-ink" position="absolute" top={dock.wordH === 3 ? 1 : 0} left={0}>
+              <Text key="mail-words" color={THEME.warn}>
+                {dock.notice}
+              </Text>
+            </Box>
+          </Box>
+        )}
         {DOCK_PLACES.map((place, i) => {
           const lit = open === place
           if (dock.tiles) {
             // the line over the tile, with the room it needs (its words and a cell each side), kept inside the pane's edges
             const line = tileTip(place, counts[place], lit)
-            const cellLeft = dock.left + BORDER + SPACE.near + i * (TILE_CELL + dock.gap)
+            const cellLeft = dock.left + BORDER + SPACE.near + (i + (dock.noticeTile === true ? 1 : 0)) * (TILE_CELL + dock.gap)
             const shift = Math.max(-(cellLeft - EDGE), Math.min(0, columns - EDGE - (cellLeft + line.length + 2 * SPACE.near)))
             return (
               <Box key={`dock-cell-${place}`} flexDirection="column" alignItems="center" width={TILE_CELL}>

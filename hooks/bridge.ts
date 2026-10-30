@@ -36,11 +36,19 @@ export const LIVE_ROOM_SH = '.kairos/runtime/room/room.sh'
 export const ANCESTORS = 6
 
 // A room found by its mark also has its `name` and its `play`; `sandoq` is the program that runs its words (set by
-// the hook once it has found one). `dir` is the room's own folder for a mark, where room.sh stands for the old road.
-export type Room = { dir: string; programs: string; run: string; gate: string; path: string; name?: string; play?: string; sandoq?: string }
+// the hook once it has found one). `dir` is the room's own folder for a mark, where room.sh stands for the old road. `his` is
+// true when the mark's fence holds `his: on` (MARK_HIS).
+export type Room = { dir: string; programs: string; run: string; gate: string; path: string; name?: string; play?: string; sandoq?: string; his?: true }
 
 // A room found by a mark, not by room.sh.
 export const isMarked = (room: Room): boolean => room.name !== undefined
+
+// His rule: his typed lines are never on the bus unless the room asks for them. A marked room gets his words, kind his, only when
+// its mark's fence holds the key `his` with the value `on`; with no key the submit hook feeds none and gives no context line. The
+// old road of room.sh feeds as before.
+export const MARK_HIS = 'his'
+export const MARK_HIS_ON = 'on'
+export const feedsHis = (room: Room): boolean => !isMarked(room) || room.his === true
 
 const parentDir = (dir: string): string => dir.replace(/\/[^/]*$/, '') || '/'
 const inDir = (dir: string, name: string): string => (dir === '/' ? `/${name}` : `${dir}/${name}`)
@@ -97,7 +105,8 @@ export function parseRoomSh(text: string, shPath: string, gateSetting = ''): Roo
 }
 
 // ---- a room found by its mark. The mark is a folder `.sandoq` in the room's folder: `room.md` (one flat block at
-// (34,3), its words the room's name, its taxonomy sandoq::room::mark, its fence `play` and `gate`); the run folder is `.sandoq` itself (order CF2).
+// (34,3), its words the room's name, its taxonomy sandoq::room::mark, its fence `play` and `gate`, and `his` when the room takes his
+// words); the run folder is `.sandoq` itself (order CF2).
 // The finder goes up to the root, nearest folder first; in each folder the mark, then room.sh, then the live room.sh. A
 // `.sandoq` with no room.md, or a room.md that is no mark block, is no room (the `.sandoq` of a worktree is a shelf).
 export const MARK_DIR = '.sandoq'
@@ -137,7 +146,8 @@ export function parseMark(text: string, folder: string, gateSetting = ''): Room 
   const { play, gate } = mark.fence
   if (name === '' || typeof play !== 'string' || play === '' || typeof gate !== 'string' || !GATE_NAME.test(gate)) return undefined
   const picked = GATE_NAME.test(gateSetting) ? gateSetting : gate
-  return { dir: folder, programs: '', run: inDir(folder, MARK_DIR), gate: picked, path: '', name, play }
+  const room: Room = { dir: folder, programs: '', run: inDir(folder, MARK_DIR), gate: picked, path: '', name, play }
+  return mark.fence[MARK_HIS] === MARK_HIS_ON ? { ...room, his: true } : room
 }
 
 // What the finder reads: a file's text (nothing when it is not there) and whether a folder stands.

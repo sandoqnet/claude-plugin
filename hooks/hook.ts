@@ -13,6 +13,7 @@ import {
   asksOf,
   cardIdFrom,
   feedinArgv,
+  feedsHis,
   findRoomFrom,
   findSandoq,
   isBridgeOff,
@@ -179,11 +180,13 @@ function submit(raw: string): string | Promise<string> {
   const cwd = input.cwd || process.cwd()
   noteSession(room, cwd, input.session)
   // A wake's turn is the room's rows, not his words, and every row must land: ONE detached child, `node hook.ts rows`, gets the turn on its
-  // input and feeds each row in order with no budget; this hook returns at once, with no wait and no context. Words of his before the turn are his.
+  // input and feeds each row in order with no budget; this hook returns at once, with no wait and no context. Words of his before the turn are his,
+  // fed only when the room takes them (feedsHis): else they are not fed and the session gets no context.
   const { his, turn } = splitTurn(input.prompt)
-  if (turn === '') return hisWords(room, cwd, input.session, input.prompt)
+  const takesHis = feedsHis(room)
+  if (turn === '') return takesHis ? hisWords(room, cwd, input.session, input.prompt) : ''
   const started = startRows(raw).then(() => '')
-  return his === '' ? started : started.then(() => hisWords(room, cwd, input.session, his))
+  return his === '' || !takesHis ? started : started.then(() => hisWords(room, cwd, input.session, his))
 }
 
 function stop(raw: string): void {

@@ -6,6 +6,8 @@ import { CHOICES, wordOf } from '../model/settings'
 import { keysState } from '../model/keys'
 import type { KeysCard } from '../model/keys'
 import { nudgeState } from '../model/nudge'
+import { mailSwitchState } from '../model/mail'
+import type { MailSwitchCard } from '../model/mail'
 import type { NudgeCard } from '../model/nudge'
 import type { SecretsCard } from '../model/secrets'
 import { secretsState } from '../model/secrets'
@@ -19,7 +21,7 @@ import type { VersionsCard } from './versions'
 // The sections of Settings, in the order the list draws them. `lens` is the Lens card, `feed` the feed and its lenses, `scene` what sits
 // on the wall, `rules` the keeper's rules, `secrets` the names the discs need (a value is set in a terminal, order S2), `versions` the pane
 // and the discs it runs (its own line, Update the pane, Check now).
-export type SettingsSection = 'lens' | 'feed' | 'scene' | 'rules' | 'secrets' | 'nudge' | 'keys' | 'versions'
+export type SettingsSection = 'lens' | 'feed' | 'scene' | 'rules' | 'secrets' | 'nudge' | 'mail' | 'keys' | 'versions'
 
 export const SECTIONS: { id: SettingsSection; title: string }[] = [
   { id: 'lens', title: 'Lens' },
@@ -28,6 +30,7 @@ export const SECTIONS: { id: SettingsSection; title: string }[] = [
   { id: 'rules', title: "The keeper's rules" },
   { id: 'secrets', title: 'Secrets' },
   { id: 'nudge', title: 'Nudge' },
+  { id: 'mail', title: 'Mail' },
   { id: 'keys', title: 'Keys' },
   { id: 'versions', title: 'Versions' },
 ]
@@ -41,10 +44,10 @@ const cap = (word: string): string => word.charAt(0).toUpperCase() + word.slice(
 const lower = (words: string): string => words.charAt(0).toLowerCase() + words.slice(1)
 const labelOf = (settings: Settings, key: 'shows' | 'open' | 'scene' | 'hour'): string => CHOICES[key].find(choice => choice.value === wordOf(settings, key))?.label ?? ''
 
-export type StateData = { settings: Settings; face: Face; rules: number; versions?: VersionsCard; secrets?: SecretsCard; nudge?: NudgeCard; keys?: KeysCard }
+export type StateData = { settings: Settings; face: Face; rules: number; versions?: VersionsCard; secrets?: SecretsCard; nudge?: NudgeCard; mail?: MailSwitchCard; keys?: KeysCard }
 
 // The one dim line of a section's state, from the data the pane holds: '' (no line) when the data holds none.
-export function stateOf(id: SettingsSection, { settings, face, rules, versions, secrets, nudge, keys }: StateData): string {
+export function stateOf(id: SettingsSection, { settings, face, rules, versions, secrets, nudge, mail, keys }: StateData): string {
   switch (id) {
     case 'lens':
       return `${cap(face)} is shown`
@@ -58,6 +61,8 @@ export function stateOf(id: SettingsSection, { settings, face, rules, versions, 
       return secretsState(secrets)
     case 'nudge':
       return nudgeState(nudge)
+    case 'mail':
+      return mailSwitchState(mail)
     case 'keys':
       return keysState(keys?.read)
     case 'versions':

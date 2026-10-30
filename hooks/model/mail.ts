@@ -115,12 +115,12 @@ export type ListedFile = { name: string; size: string }
 export type MailCard = { mail: Mail; row: string; notes: string[]; files: ListedFile[]; bare?: true }
 
 // A mail card with no put file (absent, no JSON or the wrong shape) is still a mail: the row `Mail N`, no sender, no files, and the card's text whole as its body (never
-// read for a field). It is not kept: the next read of the walks looks for the put file again, and a file that came later gives the full fields.
+// read for a field). It holds no notes: the card's text is shown whole and already holds the note lines, which would stand twice. It is not kept: the next read of the walks looks for the put file again, and a file that came later gives the full fields.
 export function bareMailCardOf(n: number, cardText: string): MailCard {
   return {
     mail: { n, from: { name: '', address: '' }, to: [], subject: '', date: '', text: cardText, files: [] },
     row: `Mail ${n}`,
-    notes: notesOf(cardText),
+    notes: [],
     files: [],
     bare: true,
   }
@@ -183,3 +183,55 @@ export function dateWords(date: string, short: boolean): string {
   const time = `${two(at.getUTCHours())}:${two(at.getUTCMinutes())} UTC`
   return short ? time : `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())} ${time}`
 }
+
+// ---- THE ROOM'S MAIL SWITCH (order M3): what `sandoq mail status` says, and the card Settings draws. Pure: no host, no view. The pane reads these lines and
+// no others: it holds no key or token, and the address is shown as sandoq wrote it, never made or parsed out of anything else.
+
+// `mail is on|off for ROOM: ADDRESS (N senders allowed)`, or `mail is off for ROOM` (the room has no row yet at the account), and after either maybe
+// `cannot work: WORD (meaning)`, kept whole.
+export type MailSwitchRead = { on: boolean; room: string; address: string; senders: number | undefined; cannot: string }
+
+const STATUS_LINE = /^mail is (on|off) for (\S+): (.+) \((\d{1,9}) senders? allowed\)$/
+const STATUS_NO_ROW = /^mail is off for (\S+)$/
+const CANNOT_WORK = /^cannot work: \S.*$/
+
+// The state in a text of `status`; none for a text of another shape (a line before, a third line, a first line of neither form).
+export function parseMailStatus(text: string): MailSwitchRead | undefined {
+  const lines = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '')
+  if (lines.length === 0 || lines.length > 2) return undefined
+  const cannot = lines[1] ?? ''
+  if (cannot !== '' && !CANNOT_WORK.test(cannot)) return undefined
+  const found = STATUS_LINE.exec(lines[0])
+  if (found !== null) return { on: found[1] === 'on', room: found[2], address: found[3], senders: Number(found[4]), cannot }
+  const bare = STATUS_NO_ROW.exec(lines[0])
+  return bare === null ? undefined : { on: false, room: bare[1], address: '', senders: undefined, cannot }
+}
+
+// The first line of a text, whole and trimmed ('' for none): what the pane shows of a status it does not read.
+export const firstLineOf = (text: string): string => text.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
+
+// sandoq's one line of a refusal without its `sandoq: `: the last line of what it wrote to stderr. An exit 2 is not read here: the pane says one plain
+// cause for it (MAIL_SWITCH_OLDER), not the usage line of sandoq.
+export const mailWhy = (code: number | undefined, err: string): string => {
+  const lines = err.split('\n').map(line => line.trim()).filter(line => line !== '')
+  return (lines[lines.length - 1] ?? '').replace(/^sandoq: /, '') || `sandoq mail exited ${code ?? 'with no code'}`
+}
+
+// The card of the section, as the register hands it. `read` is what the LAST status gave: a status that fails (a refusal, the exit 2 of an older sandoq, a text
+// the pane does not read) clears it, so the Button goes with it and `line` says why. `line` is sandoq's own line when no state is read (the exit 2 of an older sandoq is the one plain
+// line of MAIL_SWITCH_OLDER); `pressLine` the refusal of on or off, under the Button; `closed` the plain line of a pane that
+// cannot ask (no sandoq, a sandoq under MAIL_VERB_FROM, no marked room); `busy` whether a call is out.
+export type MailSwitchCard = { state: 'rest' | 'reading' | 'done'; read: MailSwitchRead | undefined; line: string; pressLine: string; closed: string; busy: boolean }
+
+export const MAIL_SWITCH_HEAD = 'Mail'
+export const MAIL_SWITCH_OFF = "Off. On, email to this room's address lands as a card."
+export const mailSwitchOn = (read: MailSwitchRead): string =>
+  `Email into this room: ${read.address === '' ? 'no address' : read.address}. ${read.senders ?? 0} ${read.senders === 1 ? 'sender' : 'senders'} may write.`
+
+// The word of the state in the list of Settings: on, off, or none before a read.
+export const mailSwitchState = (card: MailSwitchCard | undefined): string => (card === undefined || card.closed !== '' || card.read === undefined ? '' : card.read.on ? 'on' : 'off')
+// The Button stands where a state was read, and no line of a refusal of status or of a closed pane stands in its place.
+export const mailSwitchShown = (card: MailSwitchCard): boolean => card.closed === '' && card.read !== undefined && card.line === ''

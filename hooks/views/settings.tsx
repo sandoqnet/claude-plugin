@@ -1,5 +1,7 @@
 import { keysState } from '../model/keys'
 import type { KeysCard } from '../model/keys'
+import { MAIL_SWITCH_HEAD, MAIL_SWITCH_OFF, mailSwitchOn, mailSwitchShown, mailSwitchState } from '../model/mail'
+import type { MailSwitchCard } from '../model/mail'
 import { NUDGE_EVERY, NUDGE_HEAD, NUDGE_OLDER, nudgeFired, nudgeLit, nudgeState } from '../model/nudge'
 import type { NudgeCard } from '../model/nudge'
 import type { SecretRow, SecretsCard } from '../model/secrets'
@@ -373,6 +375,73 @@ export function nudgeView({ ui, surface, width: given, plan, columns, card, zone
     </Box>
   ) : (
     <Box key="settings-nudge" flexDirection="column" {...LOOK.section}>
+      {head}
+      <Text color={LOOK.quiet} wrap="wrap">
+        {note}
+      </Text>
+      {body}
+    </Box>
+  )
+}
+
+const MAIL_SWITCH_READING = 'Reading…'
+const MAIL_SWITCH_UNREAD = 'The state is not read yet.'
+
+export type MailSwitchProps = {
+  ui: Ui
+  surface?: string
+  width?: number
+  plan?: Plan
+  columns?: number
+  card: MailSwitchCard
+  // "Show the mail ›" asks for the state (the section of the app reads it when it opens); Turn it on and Turn it off ask the pane to run the verb.
+  actions: { read: () => void; toggle: () => void }
+}
+
+// The Mail section (order M3), in Nudge's look: the head Mail with on or off at the right; a note line (on: the address and how many senders may write;
+// off: what turning it on does); one Button, Turn it on or Turn it off; the line of sandoq's `cannot work`, whole and quiet, when status gave one; and under the
+// Button the line of a refusal of on or off. A pane that cannot ask, a refusal of status, the usage of an older sandoq and a status the pane does not read
+// are one line each, sandoq's own, and no Button. Before the state is read one Button asks for it, as Secrets does. The pane sends no mail and shows no key.
+export function mailSwitchView({ ui, surface, width: given, plan, columns, card, actions }: MailSwitchProps) {
+  const { Box, Text, Button } = ui
+  const app = isApp(surface)
+  const width = plan?.width ?? given
+  const quiet = app ? THEME.dim : LOOK.quiet
+  const { read } = card
+  const stands = mailSwitchShown(card)
+  const state = mailSwitchState(card)
+  const unread = card.closed === '' && card.line === '' && read === undefined && card.state === 'rest'
+  const note = card.closed !== '' ? card.closed : card.line !== '' ? card.line : read === undefined ? (card.state === 'reading' ? MAIL_SWITCH_READING : MAIL_SWITCH_UNREAD) : read.on ? mailSwitchOn(read) : MAIL_SWITCH_OFF
+  const body = [
+    unread && <Button key="mail-switch-read" {...(app ? { plain: true } : {})} label="Show the mail ›" onPress={() => actions.read()} />,
+    stands && read !== undefined && <Button key="mail-switch-turn" label={read.on ? 'Turn it off' : 'Turn it on'} onPress={() => actions.toggle()} />,
+    stands && card.pressLine !== '' && (
+      <Text key="mail-switch-press" color={quiet} wrap="wrap">
+        {card.pressLine}
+      </Text>
+    ),
+    stands && read !== undefined && read.cannot !== '' && (
+      <Text key="mail-switch-cannot" color={quiet} wrap="wrap">
+        {read.cannot}
+      </Text>
+    ),
+  ]
+  const head = (
+    <Box key="head-mail-switch" flexDirection="row" justifyContent="space-between" columnGap={SPACE.control}>
+      <Text bold>{MAIL_SWITCH_HEAD}</Text>
+      {state !== '' && <Text color={quiet}>{state}</Text>}
+    </Box>
+  )
+  return app ? (
+    <Box key="settings-mail-switch" {...cardProps(width, columns)}>
+      {head}
+      <Text color={THEME.dim} wrap="wrap">
+        {note}
+      </Text>
+      {body}
+    </Box>
+  ) : (
+    <Box key="settings-mail-switch" flexDirection="column" {...LOOK.section}>
       {head}
       <Text color={LOOK.quiet} wrap="wrap">
         {note}

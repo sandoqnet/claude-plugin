@@ -1,4 +1,4 @@
-# room-pane 0.8.90
+# room-pane 0.8.91
 
 A Claude Code plugin. It shows the room in a pane of your session: what waits for this seat, the
 cards you said, the walk the room made of each card, and the records on the room's shelf. You
@@ -347,7 +347,7 @@ lenses draw as one box each:
   shown one the default button. Events is one row an event in four columns (the time, the event
   with its first word bold, the seat, the count) from 56 cells of the row; under 56 cells the row
   has no seat column, so the event keeps 9 cells at 40 columns and 15 at 46. At the foot, outside
-  the card, the "Runs" line: "pane 0.8.90 · draws N · scene N · DISC" and "N more ›" for the rest
+  the card, the "Runs" line: "pane 0.8.91 · draws N · scene N · DISC" and "N more ›" for the rest
   of the discs with their shas. "draws" is how many times the pane was drawn since it opened,
   "scene" how many times its picture changed: while "scene" stands still the pane hands the app
   the same picture at each draw. After "scene N" stand the cause of the last change (first, svg,
@@ -832,18 +832,18 @@ living door started from the Button. The tests use a fake room and a fake sandoq
 ## Settings
 
 The place "Settings" of the dock opens the Settings window, and the wallpaper stays behind. In the
-app it is a short list of its sections, a row each: its name a Button, and under it one dim line of
-its state. They are the Lens pick, the feed and its lenses, the scene, the keeper's rules, Secrets,
-Nudge, Keys and Versions (the pane and the discs it runs). A press opens ONE section in the canvas
-with "‹ Back to Settings" on top; from 128 columns the list stays at the left. The word Close at
-the top right of the list shuts the window. The Lens section is one Button for each lens that
-Settings leaves shown (the shown one is the default button), and under Operator a Button "Room",
-the way into the Room place. A lens pressed stays in Settings; the tray of the bar says its word
-while it is not Public. In the terminal the same place is a column of every card, opened by
-"Settings" in the head, and the head's tabs pick the lens. A change applies at once and there is no
-Save. Under the group that changed stand the plain words of the change and a plain "Undo", which
-writes the settings before it back. Changes made within one minute read as one line and Undo goes
-back to before the first of them.
+app it is a short list of its sections, a row each: its name a Button, and under it one dim line
+of its state. They are the Lens pick, the feed and its lenses, the scene, the keeper's rules,
+Secrets, Nudge, Mail, Keys and Versions (the pane and the discs it runs). A press opens ONE
+section in the canvas with "‹ Back to Settings" on top; from 128 columns the list stays at the
+left. The word Close at the top right of the list shuts the window. The Lens section is one Button
+for each lens that Settings leaves shown (the shown one is the default button), and under Operator
+a Button "Room", the way into the Room place. A lens pressed stays in Settings; the tray of the
+bar says its word while it is not Public. In the terminal the same place is a column of every
+card, opened by "Settings" in the head, and the head's tabs pick the lens. A change applies at
+once and there is no Save. Under the group that changed stand the plain words of the change and a
+plain "Undo", which writes the settings before it back. Changes made within one minute read as one
+line and Undo goes back to before the first of them.
 
 The settings are one file of the pane's own, `pane.json`, in the run folder. It is
 read at each poll, never in a draw; with no file, or a bad one, the defaults stand. It holds eight
@@ -941,6 +941,32 @@ under the section, and changes nothing. The words of the section are a table by 
 NOT SEEN, said as the build knew it: a fire in a live room (the tests have a fake verb that keeps
 the schedule as the real one does), and how your terminal draws the Persian word, which many
 terminals draw unjoined or left to right.
+
+### Mail
+
+The section Mail, after Nudge and before Keys, is the switch of this room's mail: whether email to
+the room's address lands as a card. It is headed "Mail" with `on` or `off` at the right, and it is
+drawn in the look of Nudge. On, it says "Email into this room: ADDRESS. N senders may write."; off,
+"Off. On, email to this room's address lands as a card."; then one Button, "Turn it on" or "Turn it
+off", and sandoq's own `cannot work` line, whole and dim, when the status gave one. The pane holds
+no key or token, makes no address, and sends no mail: it takes the address from the lines of
+`sandoq mail status` and from nothing else.
+
+The verbs are `sandoq mail status`, `sandoq mail on` and `sandoq mail off` (sandoq 0.4.60 and
+later, text only), run in the room's folder, the folder of the desk's list, which holds the mark
+that sandoq looks for. The state is read when the section opens in the app, or on the press of
+"Show the mail ›" in the terminal's column, and once after each press of the Button; never on the
+poll, never on a timer, never in a draw. One call runs at a time: a press while a call is out does
+nothing. There is no Button, and one line in its place, where there is no sandoq or no marked room,
+where the sandoq is under 0.4.60, where the verb answers usage (exit 2), where status is refused
+(not signed in, no room here, not shared) and where its text is not one the pane reads (its first
+line, whole). A status that fails clears the state it had, so the Button goes with it. The line is
+sandoq's own, with its `sandoq: ` cut, but an exit 2 of any verb is one plain line, "The mail switch
+needs sandoq 0.4.60 or later: run sandoq update.", not sandoq's usage. A refusal of on or off is
+its line under the Button, and the state is read again.
+
+NOT SEEN: the live verbs, which answer only after the account Worker is deployed and a sandoq
+release has them; the tests have a fake sandoq that keeps the switch as the real one does.
 
 ### Versions
 

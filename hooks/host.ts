@@ -34,7 +34,7 @@ import { SEAT_NAME, fileNameFit } from './model/shelffiles.ts'
 import { urWalkFile } from './model/ur.ts'
 
 // The plugin's version: the same text as .claude-plugin/plugin.json (a test fails when they differ).
-export const VERSION = '0.8.90'
+export const VERSION = '0.8.91'
 // The channel the pane runs in: `prod` in the released pane; .kairos/devpane/refresh.sh makes it `dev` in the dev copy. The status line says it.
 export const CHANNEL = 'prod'
 // The plugin option that names the sandoq program (its settings, empty by default), as the hooks read it.
@@ -117,6 +117,14 @@ export const secretListArgv = (host: Host): string[] => [host.sandoq ?? '', SECR
 const DESK_VERB = 'desk'
 export const deskListArgv = (host: Host): string[] => inRunArgv(host, [host.sandoq ?? '', ROOM_NOUN, DESK_VERB, 'list', JSON_WORD, '--all'])
 export const deskDoneArgv = (host: Host, id: string): string[] => inRunArgv(host, [host.sandoq ?? '', ROOM_NOUN, DESK_VERB, 'done', id])
+// THE ROOM'S MAIL SWITCH (order M3): `sandoq mail status | on | off`, text only, for the shared room of the folder it runs in (sandoq's room_find: the nearest mark
+// up). It runs in the room's own folder, the same one as the desk's list, which holds the mark. Only a marked room has the verb. MAIL_VERB_FROM is the first sandoq
+// that has the three (VERB_SINCE of sandoq.py), read from `sandoq --version` as ROOM_APP_FROM is. The pane holds no key and no token and sends no mail.
+export const MAIL_VERB_FROM = '0.4.60'
+const MAIL_NOUN = 'mail'
+export type MailVerb = 'status' | 'on' | 'off'
+export const mailVerbArgv = (host: Host, verb: MailVerb): string[] | undefined =>
+  host.marked === true && (host.sandoq ?? '') !== '' ? inRunArgv(host, [host.sandoq ?? '', MAIL_NOUN, verb]) : undefined
 // The room app: `sandoq room open NAME letter ID` finds or starts the one server of the panel and opens his browser at the letter; the pane
 // holds no port, no token and no opener for it. NAME is the marked room's name and ID the card's id, each of the plain word shape (letters, digits,
 // dot, dash, underscore, no dash first, so neither is read as a flag), else there is no argv. It runs in the room's own folder, as the other calls

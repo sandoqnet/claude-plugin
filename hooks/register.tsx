@@ -7,6 +7,7 @@ import {
   NO_ROOM,
   NO_SANDOQ,
   POLL_MS,
+  MAIL_VERB_FROM,
   ROOM_APP_FROM,
   ROOM_APP_LIMIT,
   ROOM_PAGE_FROM,
@@ -37,6 +38,7 @@ import {
   roomAppHas,
   SANDOQ_UPDATE_FROM,
   roomAppVersionArgv,
+  mailVerbArgv,
   roomFileArgv,
   roomFilesArgv,
   roomNudgeArgv,
@@ -122,8 +124,8 @@ import { drawnNow, failedNow, firstLine, noteFailure, resetDrawn } from './model
 import { ACTIONS, PLACES, THEMES, TOOL, isAction, isIn, kitThemeOf, noAction, noValue, themeWords, widthOf } from './model/driven'
 import type { KitTheme, ThemeAsk } from './model/driven'
 import { discNamesOf, roomDiscNamesOf } from './model/layouts'
-import { MAIL_FOLDER, bareMailCardOf, mailCardOf, mailOf, mailPutName } from './model/mail'
-import type { Mail } from './model/mail'
+import { MAIL_FOLDER, bareMailCardOf, firstLineOf, mailCardOf, mailOf, mailPutName, mailWhy, parseMailStatus } from './model/mail'
+import type { Mail, MailSwitchCard, MailSwitchRead } from './model/mail'
 import { clockText, keeperPicks, pendingTaps } from './model/motion'
 import type { PendingTap } from './model/motion'
 import { OPEN_PAGE, pagesKept } from './model/pages'
@@ -1498,6 +1500,100 @@ async function doNudge($): Promise<string> {
   await pressNudge($)
   const now = nudgeCardNow()
   return now.line !== '' ? now.line : now.read?.on === true ? `Nudge on, every ${now.read.every}.` : 'Nudge off.'
+}
+
+// THE ROOM'S MAIL SWITCH (order M3), the Mail section of Settings. `sandoq mail status` is read when the section opens in the app, or on the press of the terminal's
+// "Show the mail ›" (the terminal's column has no section, as Secrets has none), and once after each press of Turn it on or Turn it off; never on the poll,
+// never on a timer, never at a draw. ONE call at a time: a read or a press while a call is out does nothing. The verb runs in the room's folder (mailVerbArgv,
+// the folder of the desk's list, which holds the mark that sandoq's room_find looks for). A sandoq under MAIL_VERB_FROM, no sandoq and no marked room are one
+// line and no Button, and no call; so are a refusal of status and a status the pane does not read: sandoq's own line, whole, with its `sandoq: ` cut. The exit 2 of
+// an older sandoq (status, on or off) is the one plain line MAIL_SWITCH_OLDER, not sandoq's usage. A refusal of on or off is its line under the Button. The pane holds no key or token, parses no address from anything but these lines, and
+// sends no mail.
+type MailSwitchKept = { state: 'rest' | 'reading' | 'done'; read: MailSwitchRead | undefined; line: string; pressLine: string; busy: boolean }
+const NO_MAIL_SWITCH: MailSwitchKept = { state: 'rest', read: undefined, line: '', pressLine: '', busy: false }
+let mailSwitch: MailSwitchKept = NO_MAIL_SWITCH
+let mailSwitchRun = 0
+let mailSwitchOut = false
+// Why the version of the sandoq could not be asked when the section needed it ('' while it can or was not asked).
+let mailSwitchUnasked = ''
+const MAIL_SWITCH_NO_SANDOQ = 'No sandoq was found for this room, so its mail switch cannot be read.'
+const MAIL_SWITCH_NO_MARK = 'The mail switch needs a room found by its mark: none stands here.'
+const MAIL_SWITCH_OLDER = `The mail switch needs sandoq ${MAIL_VERB_FROM} or later: run sandoq update.`
+const MAIL_SWITCH_UNASKED = 'The pane could not ask which sandoq runs here, so the mail switch is not asked.'
+const mailSwitchClosed = (): string => {
+  if (mailVerbArgv(host, 'status') === undefined) return noSandoq() ? MAIL_SWITCH_NO_SANDOQ : MAIL_SWITCH_NO_MARK
+  if (roomApp === undefined || roomApp.sandoq !== host.sandoq) return mailSwitchUnasked
+  return roomAppHas(roomApp.said, MAIL_VERB_FROM) ? '' : MAIL_SWITCH_OLDER
+}
+const mailSwitchCardNow = (): MailSwitchCard => ({ ...mailSwitch, closed: mailSwitchClosed() })
+const forgetMailSwitch = (): void => {
+  mailSwitch = NO_MAIL_SWITCH
+  mailSwitchRun += 1
+  mailSwitchOut = false
+  mailSwitchUnasked = ''
+}
+
+// One verb, its exit, its out and its err, or the line of why it did not end: a time out or a run that did not start.
+async function runMailVerb($, verb: 'status' | 'on' | 'off'): Promise<{ code: number | undefined; out: string; err: string; fault: string }> {
+  const argv = mailVerbArgv(host, verb)
+  if (argv === undefined) return { code: undefined, out: '', err: '', fault: MAIL_SWITCH_NO_MARK }
+  try {
+    const got = await runWithin($, argv, verb === 'status' ? LIMIT.poll : LIMIT.send, `sandoq mail ${verb}`)
+    return { code: got.exitCode, out: String(got.stdout ?? ''), err: String(got.stderr ?? ''), fault: '' }
+  } catch (error) {
+    return { code: undefined, out: '', err: '', fault: isUnanswered(error) ? `sandoq mail ${verb} did not answer in time.` : `sandoq mail ${verb} did not run.` }
+  }
+}
+
+// A read of the state, and after a press its run first. A press that the section does not offer (no state read, a line in its place) does nothing.
+async function callMailSwitch($, press?: 'on' | 'off'): Promise<void> {
+  if (mailSwitchOut) return
+  mailSwitchOut = true
+  const run = (mailSwitchRun += 1)
+  mailSwitch = { ...mailSwitch, state: 'reading', busy: press !== undefined, ...(press === undefined ? {} : { pressLine: '' }) }
+  $.ui.invalidate('ui.render')
+  try {
+    if (roomApp === undefined || roomApp.sandoq !== host.sandoq) await readRoomApp($)
+    if (run !== mailSwitchRun) return
+    mailSwitchUnasked = roomApp === undefined && (host.sandoq ?? '') !== '' ? MAIL_SWITCH_UNASKED : ''
+    if (mailSwitchClosed() !== '') {
+      mailSwitch = { ...mailSwitch, state: 'done', busy: false }
+      return
+    }
+    let pressLine = ''
+    if (press !== undefined) {
+      const done = await runMailVerb($, press)
+      if (run !== mailSwitchRun) return
+      if (done.fault !== '') pressLine = done.fault
+      else if (done.code === 2) pressLine = MAIL_SWITCH_OLDER
+      else if (done.code !== 0) pressLine = scrub(mailWhy(done.code, done.err))
+    }
+    const got = await runMailVerb($, 'status')
+    if (run !== mailSwitchRun) return
+    let read: MailSwitchRead | undefined
+    let line = ''
+    if (got.fault !== '') line = got.fault
+    else if (got.code === 0) {
+      read = parseMailStatus(got.out)
+      if (read === undefined) line = scrub(firstLineOf(got.out)) || 'The pane could not read the state sandoq gave.'
+    } else line = got.code === 2 ? MAIL_SWITCH_OLDER : scrub(mailWhy(got.code, got.err))
+    mailSwitch = { state: 'done', read, line, pressLine, busy: false }
+  } finally {
+    if (run === mailSwitchRun) {
+      mailSwitchOut = false
+      if (mailSwitch.state === 'reading') mailSwitch = { ...mailSwitch, state: 'done', busy: false }
+      $.ui.invalidate('ui.render')
+    }
+  }
+}
+
+const readMailSwitch = ($): Promise<void> => callMailSwitch($)
+
+// Turn it on, Turn it off: the verb the state read offers, then the state again. With no state read, a line in its place, or a call out, nothing runs.
+async function pressMailSwitch($): Promise<void> {
+  const card = mailSwitchCardNow()
+  if (mailSwitchOut || card.read === undefined || card.closed !== '' || card.line !== '') return
+  return callMailSwitch($, card.read.on ? 'off' : 'on')
 }
 
 // A press on a name: its line shows under the row, or hides when it shows. A name the list does not hold shows nothing.
@@ -3823,6 +3919,9 @@ async function openNav($, nextWanted: Nav) {
   // And the Nudge section reads the state of the verb when it opens (the terminal's column, which has no section, holds the state read at the pane's opening).
   const inNudge = (place: Nav): boolean => place.view === 'settings' && place.section === 'nudge'
   if (inNudge(next) && !inNudge(was)) void readNudge($)
+  // The Mail section reads the state of the room's mail switch when it opens, as Nudge's does: nothing else runs at its opening.
+  const inMail = (place: Nav): boolean => place.view === 'settings' && place.section === 'mail'
+  if (inMail(next) && !inMail(was)) void readMailSwitch($)
   // His desk (order DESK): the items are read when the desk opens, then by the poll.
   if (next.view === 'desk') deskAsked = true
   if (next.view === 'desk' && !deskWas) void readDesk($).catch(error => noteRead({ part: 'his desk', error }))
@@ -4087,6 +4186,9 @@ const actionsOf = ($): Actions => ({
   // The Secrets section (order S2): the list is read; a press on a name shows its line.
   readSecrets: () => readSecrets($),
   showSecret: name => showSecret($, name),
+  // The Mail section (order M3): the state is read; a press of Turn it on or off runs the verb and reads it again.
+  readMailSwitch: () => readMailSwitch($),
+  pressMailSwitch: () => pressMailSwitch($),
   // The Keys section (order keys): his tap on "Add them to your keys" is the only call that writes his keybindings.json.
   addKeys: () => addKeysFile($),
   // Nudge (order nudge pane): the bar's toggle and the Every of Settings; the state is read on open, on this press and at a wake, never on a timer.
@@ -4546,7 +4648,7 @@ const paneOf = ($, e) => {
     ...(came === undefined ? {} : { came }),
     // Versions reads the card; so does What it plays, where the acts of the discs stand (order DP, P4 part 3)
     ...(nav.view === 'settings' || (nav.view === 'room' && nav.card === 'plays') ? { versionsCard: versionsCardNow($) } : {}),
-    ...(nav.view === 'settings' ? { secretsCard: secretsCardNow(), keysCard: keysCardNow() } : {}),
+    ...(nav.view === 'settings' ? { secretsCard: secretsCardNow(), keysCard: keysCardNow(), mailSwitchCard: mailSwitchCardNow() } : {}),
     keysSet: keyLineSet(keysRead),
     nudgeCard: nudgeCardNow(),
     deskCard: deskCardNow(),
@@ -4694,6 +4796,7 @@ export const register: Register = on => {
     discsRun += 1
     forgetTable()
     forgetSecrets()
+    forgetMailSwitch()
     forgetDesk()
     forgetFeed()
     if (reading !== undefined) reading.dead = true

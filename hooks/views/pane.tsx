@@ -54,7 +54,7 @@ import { shapeView } from './shape'
 import type { SeatProps } from './seat'
 import { seatWindowView, seatsView } from './seats'
 import { nudgeShown } from '../model/nudge'
-import { keysView, nudgeView, secretsView, settingsParts } from './settings'
+import { keysView, mailSwitchView, nudgeView, secretsView, settingsParts } from './settings'
 import { settingsListView } from './settingslist'
 import { landingView, makerFlowView } from './makerflow'
 import { bandView, skippedView } from './updateband'
@@ -1079,6 +1079,20 @@ const settingsPlace = (state: RoomState) => {
             actions: { every: every => void actions.nudge?.(every), toggle: () => void actions.nudge?.() },
           }),
         ]
+  // The Mail card (order M3): the state of the room's mail switch, beside Nudge; with no card handed over it is not drawn.
+  const mail =
+    state.mailSwitchCard === undefined
+      ? []
+      : [
+          mailSwitchView({
+            ui,
+            ...frameOf(state),
+            surface: surfaceOf(state),
+            width: state.layer,
+            card: state.mailSwitchCard,
+            actions: { read: () => void actions.readMailSwitch?.(), toggle: () => void actions.pressMailSwitch?.() },
+          }),
+        ]
   // The Keys card (order keys): what his keybindings.json says of the five keys; with no card handed over it is not drawn.
   const keys =
     state.keysCard === undefined
@@ -1091,16 +1105,16 @@ const settingsPlace = (state: RoomState) => {
       return settingsListView({
         ui,
         ...frameOf(state),
-        data: { settings: settingsOf(state), face: state.face, rules: rules.length, versions: state.versionsCard, secrets: state.secretsCard, nudge: state.nudgeCard, keys: state.keysCard },
+        data: { settings: settingsOf(state), face: state.face, rules: rules.length, versions: state.versionsCard, secrets: state.secretsCard, nudge: state.nudgeCard, mail: state.mailSwitchCard, keys: state.keysCard },
         canvasRows: canvasRowsNow(state) - LINK_ROWS,
         page: state.pages?.settings ?? 0,
         ...(state.opened?.view === 'settings' && state.opened.section !== undefined ? { openSection: state.opened.section } : {}),
         actions: { open: id => actions.open({ view: 'settings', section: id }), page: (list, page) => void actions.page?.(list, page) },
       })
     }
-    return { lens, feed: [parts.groups.lenses], scene: [withBackgroundLine(state, parts.groups.scene)], rules: [parts.rules], secrets, nudge, keys, versions }[section]
+    return { lens, feed: [parts.groups.lenses], scene: [withBackgroundLine(state, parts.groups.scene)], rules: [parts.rules], secrets, nudge, mail, keys, versions }[section]
   }
-  return [...backView(state), ...reachLenses(state), parts.groups.lenses, parts.groups.scene, parts.rules, ...secrets, ...nudge, ...keys, ...lens, ...versions, <Text key="nav-space"> </Text>]
+  return [...backView(state), ...reachLenses(state), parts.groups.lenses, parts.groups.scene, parts.rules, ...secrets, ...nudge, ...mail, ...keys, ...lens, ...versions, <Text key="nav-space"> </Text>]
 }
 
 // The Room place (order A-W6), under Operator alone: who sits, what it plays, the door, the programs running and what

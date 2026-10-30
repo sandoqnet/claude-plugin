@@ -9,6 +9,7 @@ import type { MotionRow, PendingTap } from '../model/motion.ts'
 import type { FeedEntry } from '../model/roomfeed.ts'
 import type { KeysCard } from '../model/keys.ts'
 import type { NudgeCard } from '../model/nudge.ts'
+import type { MailSwitchCard } from '../model/mail.ts'
 import type { SecretsCard } from '../model/secrets.ts'
 import type { SettingKey, Settings } from '../model/settings.ts'
 import type { CatalogEntry, Disc } from '../model/shelf.ts'
@@ -143,6 +144,10 @@ export type Actions = {
   // takes no value and runs no set: a secret is set in a terminal or in the sandoq control panel.
   readSecrets?: () => void | Promise<void>
   showSecret?: (name: string) => void | Promise<void>
+  // The Mail section of Settings (order M3): the section opens in the app and reads `sandoq mail status`; the terminal's column reads it on the press of "Show the mail ›".
+  // A press of Turn it on or Turn it off runs the verb and reads the state again. Never on the poll, never on a timer.
+  readMailSwitch?: () => void | Promise<void>
+  pressMailSwitch?: () => void | Promise<void>
   // The Keys section of Settings (order keys): "Add them to your keys" writes the missing lines to the Chat block of his keybindings.json. It is
   // his tap alone that calls it; a key bound to another thing is never written over.
   addKeys?: () => void | Promise<void>
@@ -355,6 +360,8 @@ export type PaneProps = {
   keysSet?: boolean
   // The Nudge of the pane's seat (order nudge pane): the bar's toggle and the Nudge section of Settings read it. None draws no toggle.
   nudgeCard?: NudgeCard
+  // The Mail card of the Settings place (order M3): the state of the room's mail switch; none draws no card.
+  mailSwitchCard?: MailSwitchCard
   // His desk (order DESK): what the last read of the items gave, drawn by the desk place, and counted by the dock and the tray at rest too.
   deskCard?: DeskCard
   // The keys of the keeper's picks he took off the desk by OK (order T3): a pick of these is no row.

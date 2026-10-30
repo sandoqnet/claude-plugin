@@ -1654,11 +1654,12 @@ const forgetDesk = (): void => {
 let deskPageKept = 0
 // A read of the desk by the poll is out: the next poll starts none until it ends.
 let deskPolling = false
-// The text of desk.md at the last list that gave items (order P1, the desk list leaves the idle poll): the poll reads the file's text each tick and
-// starts `sandoq room desk list` only when the text differs from this one. undefined is no good list yet. The path is the file sandoq reads for the
+// The text of desk.md read before the last list, whether the list gave items or failed (order P1, the desk list leaves the idle poll; order D, a failed
+// list keeps it too): the poll reads the file's text each tick and starts `sandoq room desk list` only when the text differs from this one. undefined is
+// no list tried yet. The desk opening, a Done, the tool and a new session list at once whatever it holds. The path is the file sandoq reads for the
 // list: its DESK_FILE, shelves/room/desk.md, under the run folder, which is host.root (sandoq takes the run of the room from the folder the pane runs
 // it in, host.work, as `.sandoq`). A missing file reads as '' (sandoq: no file is no item), and so does a read that failed: the host's readText
-// gives '' for both, so a fault can only list when the last good text was not ''.
+// gives '' for both, so a fault can only list when the text kept was not ''.
 let deskListedText: string | undefined
 const deskTextOf = ($): Promise<string> => readText(ioOf($), host, `${host.root}/shelves/room/desk.md`)
 // The desk was asked for (opened by a press or a tool), not only the place the session began on: the terminal draws it then, and not before.
@@ -1699,9 +1700,10 @@ async function readDesk($, quiet = false): Promise<void> {
   const open = new Set(kept.filter(item => !item.done).map(item => item.id))
   desk = { ...desk, state: 'done', items: kept, older, line, opened: open.has(desk.opened) ? desk.opened : '', lines: Object.fromEntries(Object.entries(desk.lines).filter(([id]) => open.has(id))) }
   // The doorbell (order T2): the first read of the desk only seeds; after it an item new and for him rings once, from this same read. A read that
-  // gave no list (a refusal, a time out) seeds nothing and rings nothing.
+  // gave no list (a refusal, a time out) seeds nothing and rings nothing. The text is kept either way (order D): a list that failed is not tried
+  // again at every tick, only when the text changes.
+  deskListedText = text
   if (items !== undefined) {
-    deskListedText = text
     if (deskSeeded) bell.push(...freshRings(kept, itemSeen))
     for (const item of kept) itemSeen.add(item.id)
     deskSeeded = true
@@ -1712,7 +1714,7 @@ async function readDesk($, quiet = false): Promise<void> {
   if (!quiet || JSON.stringify(desk) !== before) $.ui.invalidate('ui.render')
 }
 
-// The poll's read of the desk (order P1): the text of desk.md first; a text that is the text of the last good list starts no list. The desk opening, a
+// The poll's read of the desk (order P1): the text of desk.md first; a text that is the text read before the last list, good or failed, starts no list. The desk opening, a
 // Done and the tool read the list whatever the text (readDesk).
 async function deskPoll($): Promise<void> {
   if (noSandoq()) return
